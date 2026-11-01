@@ -21,7 +21,7 @@ One-tap Android root for Samsung Galaxy devices, built around the
 | Root lifetime | Per-boot (ephemeral — cleared on reboot) |
 
 Tested on **SM-S921N** (e1s, Exynos 2400), kernel
-`6.1.162-android14-11`, OneUI 8.
+`6.1.162-android14-11`, OneUI 9.
 
 ## Features
 
