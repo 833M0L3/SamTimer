@@ -4,6 +4,10 @@ One-tap Android root for Samsung Galaxy devices, built around the
 **CVE-2026-98260** timer exploit (posix-cpu-timers UAF) and a
 **KernelSU-Next** late-load module with Samsung KDP/RKP/DEFEX compatibility.
 
+> Based on the **CVE-2026-98260-aurora** repo — its timer LPE port
+> (real-cred zero-write / fake-cred ksud late-load chains) is what
+> `app/src/main/cpp/timer.c` evolved from.
+
 > [!WARNING]
 > For devices you own or are explicitly authorized to test. The exploit is a
 > probabilistic kernel UAF — a failed run can leave the system unstable until
@@ -81,6 +85,10 @@ Tested on **SM-S921N** (e1s, Exynos 2400), kernel
 
 ## Credits / upstream
 
+- [CVE-2026-98260-aurora](https://github.com/sbmatch/CVE-2026-98260-aurora) — this app is built on the `aurora` repo's timer
+  LPE port: the `timer.c` payload (real-cred zero-write and fake-cred /
+  ksud late-load chains) started there and lives in this project as
+  `app/src/main/cpp/timer.c`
 - [BuSung-dev/Root-My-Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy) —
   the verified Samsung KSU late-load flow this app mirrors (`su_daemon.c`
   shape, `.ksud-stage` staging, manager pairing)
