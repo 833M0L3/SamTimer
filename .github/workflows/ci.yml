@@ -20,16 +20,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK (cmdline-tools)
+      # The runner ships an SDK at /usr/local/lib/android/sdk
+      # (ANDROID_SDK_ROOT); point ANDROID_HOME at the same path -- AGP
+      # refuses to configure when the two disagree.
+      - name: Configure SDK paths
         run: |
-          set -e
-          mkdir -p "$HOME/android-sdk/cmdline-tools"
-          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
-          unzip -q /tmp/cmdline-tools.zip -d "$HOME/android-sdk/cmdline-tools"
-          mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
-          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$HOME/android-sdk/platform-tools" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
       - name: Install platform, build-tools and NDK
         run: |
@@ -45,7 +43,7 @@ jobs:
 
       - name: Build debug APK (payload + app)
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
         run: ./gradlew assembleDebug
 
       - name: Upload APK
