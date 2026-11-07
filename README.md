@@ -80,12 +80,16 @@ Tested on **SM-S921N** (e1s, Exynos 2400), kernel
 3. KernelSU-Next loads (no-patch-text build — live text patching panics on
    Exynos 2400), SELinux is restored to enforcing by ksud
 4. Success is verified through the KSU driver's `reboot()` backdoor ioctl
-5. Failed-plant zombies are kept unreaped by a parked holder process until
-   reboot (reaping them corrupts live kernel memory — keep it alive)
+5. Failed-plant zombies are made reap-safe first — their posix-cpu-timer
+   queue leftmost pointers are zeroed through the write primitive, so
+   `posix_cpu_timers_exit` finds empty queues and the reap cannot touch the
+   stale node — then reaped on the spot. Nothing is left parked and there is
+   never a zombie for init to reap later; a park is only a last-resort
+   fallback when a repair plant cannot land
 
 ## Credits / upstream
 
-- [CVE-2026-98260-aurora](https://github.com/sbmatch/CVE-2026-98260-aurora) — this app is built on the `aurora` repo's timer
+- **CVE-2026-98260-aurora** — this app is built on the `aurora` repo's timer
   LPE port: the `timer.c` payload (real-cred zero-write and fake-cred /
   ksud late-load chains) started there and lives in this project as
   `app/src/main/cpp/timer.c`
