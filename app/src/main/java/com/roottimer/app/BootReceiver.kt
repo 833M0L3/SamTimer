@@ -14,7 +14,10 @@ import java.util.concurrent.TimeUnit
  *
  *   ShizukuWaitWorker  - waits for Shizuku's binder (it starts on its own
  *                        boot receiver when the user set wireless debugging
- *                        to auto-start), up to 8 minutes.
+ *                        to auto-start), up to 8 minutes.  The chain also
+ *                        delays 3 minutes after boot first: the system is
+ *                        still settling (load spikes eat the UAF race and
+ *                        early runs fail far more often).
  *   AutoRootWorker     - binds the UserService and runs the exploit, with a
  *                        notification at each phase.  A failed run disables
  *                        the toggle so a bad build cannot boot-loop the
@@ -27,7 +30,7 @@ class BootReceiver : BroadcastReceiver() {
         if (!prefs.getBoolean(Prefs.AUTO_ROOT, false)) return
 
         val wait = OneTimeWorkRequestBuilder<ShizukuWaitWorker>()
-            .setInitialDelay(45, TimeUnit.SECONDS)
+            .setInitialDelay(180, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context)
             .beginUniqueWork("auto_root", ExistingWorkPolicy.REPLACE, wait)

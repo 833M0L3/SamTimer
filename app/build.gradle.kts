@@ -78,6 +78,18 @@ android {
         versionName = "1.1"
     }
 
+    // Shared debug key: the repo ships the debug keystore so every build
+    // (CI artifact, local, anyone's machine) signs with the same
+    // identity and installs as an update over the previous one.  The
+    // standard debug credentials apply.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
