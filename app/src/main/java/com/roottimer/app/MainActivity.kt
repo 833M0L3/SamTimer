@@ -324,6 +324,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startRun() {
+        val remain = bootSettleRemainingMs()
+        if (remain > 0) {
+            waitBootSettle(remain)
+            return
+        }
         if (!running.compareAndSet(false, true)) return
         isRunning = true
         runEnabled = false
@@ -351,6 +356,42 @@ class MainActivity : ComponentActivity() {
         } else {
             ensureBound() // onServiceConnected launches it
         }
+    }
+
+    /** Pause a run until the end of the post-boot settle window: the system
+     *  is still churning for 3 minutes after boot_completed and load spikes
+     *  eat the UAF race, so a manual run pressed too early is held back
+     *  (with a countdown) rather than thrown away. */
+    private fun bootSettleRemainingMs(): Long {
+        val at = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
+            .getLong(Prefs.BOOT_AT_ELAPSED, -1L)
+        if (at < 0) return 0L // no boot record (e.g. fresh install mid-boot)
+        val delta = android.os.SystemClock.elapsedRealtime() - at
+        return if (delta in 0 until BOOT_SETTLE_MS) BOOT_SETTLE_MS - delta else 0L
+    }
+
+    private fun waitBootSettle(remainMs: Long) {
+        isRunning = true
+        runEnabled = false
+        runLabel = getString(R.string.run_running)
+        appendLog(getString(R.string.log_settle_wait, (remainMs + 999) / 1000))
+        Thread {
+            var left = remainMs
+            while (left > 0) {
+                main.post {
+                    setStatus(getString(R.string.status_settle_fmt, (left + 999) / 1000), Warn)
+                }
+                val step = minOf(1_000L, left)
+                Thread.sleep(step)
+                left -= step
+            }
+            main.post {
+                appendLog(getString(R.string.log_settle_done))
+                isRunning = false
+                updateRootBadge()
+                startRun()
+            }
+        }.start()
     }
 
     private fun checkPermission(): Boolean =
@@ -412,5 +453,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val REQ_PERM = 101
         private const val REQ_NOTIF = 102
+        /** Auto-root and manual runs both hold this long after boot_completed. */
+        private const val BOOT_SETTLE_MS = 180_000L
     }
 }

@@ -3,6 +3,7 @@ package com.roottimer.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -27,6 +28,12 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val prefs = context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
+        // Always record the boot-completed moment (within a few seconds of
+        // sys.boot_completed): MainActivity holds manual runs inside the
+        // 3-minute settle window based on this.
+        prefs.edit()
+            .putLong(Prefs.BOOT_AT_ELAPSED, SystemClock.elapsedRealtime())
+            .apply()
         if (!prefs.getBoolean(Prefs.AUTO_ROOT, false)) return
 
         val wait = OneTimeWorkRequestBuilder<ShizukuWaitWorker>()

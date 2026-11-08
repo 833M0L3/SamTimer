@@ -36,7 +36,9 @@ Tested on **SM-S921N** (e1s, Exynos 2400), kernel
 - **Auto-root after reboot** — boot receiver → WorkManager chain that waits
   3 minutes for the system to settle, waits for Shizuku, then runs the chain
   headless with progress notifications; a failed run disables the option
-  itself (boot-loop protection)
+  itself (boot-loop protection); a manual run pressed inside the
+  3-minute post-boot window is held back with a countdown instead of
+  being thrown at a still-busy system
 - **Safe boot (block modules)** — one-run panic recovery for a bad module:
   at the next run the rooted stage touches `disable` in every KernelSU
   module dir and parks `service.d` / `post-fs-data.d`; turn the switch off
