@@ -120,25 +120,6 @@ class RootService(private val context: Context) : IRootService.Stub() {
             log(callback, "warn: ksud staging failed (${e.message}); KSU load will fail")
         }
 
-        // 1b. Safe-mode marker: a bad module or a service.d script can
-        // boot-loop the phone.  When the toggle is on, the next run's root
-        // stage touches `disable` in every module dir and parks both script
-        // dirs (post-fs-data.d, service.d) under *.disabled-by-samtimer;
-        // turning the toggle back off restores them one run later.
-        val safeMark = File(workDir, "safe_mode")
-        try {
-            val prefs = context.getSharedPreferences(Prefs.NAME, Context.MODE_PRIVATE)
-            if (prefs.getBoolean(Prefs.SAFE_MODE, false)) {
-                safeMark.writeText("disable")
-                log(callback, "safe mode: modules + script dirs block staged")
-            } else if (safeMark.isFile) {
-                safeMark.writeText("restore")
-                log(callback, "safe mode off: restore staged for next run")
-            }
-        } catch (e: IOException) {
-            log(callback, "warn: safe-mode marker failed (${e.message})")
-        }
-
         // 1c. UMH helper: the same payload binary under the path the fake
         // usermodehelper execs (ROOT_UMH_PATH); --umh runs setksu_main.
         try {

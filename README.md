@@ -40,8 +40,9 @@ Tested on **SM-S921N** (e1s, Exynos 2400), kernel
   3-minute post-boot window is held back with a countdown instead of
   being thrown at a still-busy system
 - **Safe boot (block modules)** — one-run panic recovery for a bad module:
-  at the next run the rooted stage touches `disable` in every KernelSU
-  module dir and parks `service.d` / `post-fs-data.d`; turn the switch off
+  the payload reads the toggle straight out of the app's prefs XML at stage
+  time (DirtyFrag pattern — no relay file).  Enabled: every KernelSU module
+  dir gets a `disable` flag and service.d / post-fs-data.d are parked; turn the switch off
   and the following run restores everything (the auto-root chain re-establishes
   root every boot regardless, so the fix reaches you even if the phone
   boot-looped)
