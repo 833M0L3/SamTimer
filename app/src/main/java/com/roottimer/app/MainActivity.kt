@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private var statusText by mutableStateOf("")
     private var statusColor by mutableStateOf(Color(0xFF8B98A5))
     private var autoRoot by mutableStateOf(false)
+    private var safeMode by mutableStateOf(false)
     private var showRunConfirm by mutableStateOf(false)
     private var showAutoConfirm by mutableStateOf(false)
     private val logs = mutableStateListOf<String>()
@@ -134,6 +135,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         autoRoot = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
             .getBoolean(Prefs.AUTO_ROOT, false)
+        safeMode = getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
+            .getBoolean(Prefs.SAFE_MODE, false)
         rootLabel = getString(R.string.root_checking)
         shizukuLabel = getString(R.string.shizuku_checking)
         runLabel = getString(R.string.run_root)
@@ -177,6 +180,14 @@ class MainActivity : ComponentActivity() {
                                 .edit().putBoolean(Prefs.AUTO_ROOT, false).apply()
                             appendLog(getString(R.string.log_auto_off))
                         }
+                    },
+                    safeMode = safeMode,
+                    onSafeToggle = { checked ->
+                        safeMode = checked
+                        getSharedPreferences(Prefs.NAME, MODE_PRIVATE)
+                            .edit().putBoolean(Prefs.SAFE_MODE, checked).apply()
+                        if (checked) appendLog("safe mode: next run blocks modules + script dirs")
+                        else appendLog("safe mode off: next run restores modules + script dirs")
                     },
                 )
 

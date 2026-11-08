@@ -41,6 +41,10 @@
     <string name="auto_title">Auto-root after reboot</string>
     <string name="auto_desc">Waits for Shizuku on boot, then runs automatically · disables itself on failure</string>
 
+    <!-- Safe boot: block KSU modules + boot script dirs (breach recovery) -->
+    <string name="safe_title">Safe boot (block modules)</string>
+    <string name="safe_desc">Next run disables every KSU module and parks service.d / post-fs-data.d — for a module that boot-loops the phone · turn off to restore on the run after</string>
+
     <!-- Log -->
     <string name="log_label">LOG</string>
     <string name="log_run_started">run started</string>

@@ -1218,6 +1218,47 @@ static void write_ksu_script(void)
         /* The parent only frees the spray pool (the forged cred lives in
          * one of those pages) when this marker reads "done". */
         "echo pending > /data/local/tmp/samtimer/cleanup.ok\n"
+        /* Safe-mode toggle: the app stages /data/local/tmp/samtimer/safe_mode
+         * ("disable" or "restore").  A bad module or a service.d script can
+         * boot-loop the device, so this runs first, in the forged root (init)
+         * context, even before the late-load -- if the load fails anyway the
+         * markers still land and the next boot is clean.  One shot: removed
+         * after acting, the app re-stages it on every run.  The kernelsu
+         * module dir itself is never disabled -- our chain re-establishes
+         * root every boot via late-load and does not depend on the dir. */
+        "if [ -f /data/local/tmp/samtimer/safe_mode ]; then\n"
+        "  SM=$(cat /data/local/tmp/samtimer/safe_mode)\n"
+        "  if [ \"$SM\" = disable ]; then\n"
+        "    if [ -d /data/adb/modules ]; then\n"
+        "      for d in /data/adb/modules/*/; do\n"
+        "        id=${d%/}; id=${id##*/}\n"
+        "        [ \"$id\" = kernelsu ] && continue\n"
+        "        touch \"${d}disable\"\n"
+        "        echo \"[safe] module disabled: $id\"\n"
+        "      done\n"
+        "    fi\n"
+        "    for s in post-fs-data.d service.d; do\n"
+        "      [ -d \"/data/adb/$s\" ] && mv \"/data/adb/$s\" \"/data/adb/$s.disabled-by-samtimer\" && echo \"[safe] $s parked\"\n"
+        "    done\n"
+        "    echo '[safe] modules + script dirs blocked'\n"
+        "  elif [ \"$SM\" = restore ]; then\n"
+        "    for d in /data/adb/modules/*/; do\n"
+        "      rm -f \"${d}disable\"\n"
+        "    done\n"
+        "    for s in post-fs-data.d service.d; do\n"
+        "      [ -d \"/data/adb/$s.disabled-by-samtimer\" ] || continue\n"
+        "      if [ -d \"/data/adb/$s\" ]; then\n"
+        "        cp -r \"/data/adb/$s.disabled-by-samtimer/.\" \"/data/adb/$s/\"\n"
+        "        rm -rf \"/data/adb/$s.disabled-by-samtimer\"\n"
+        "      else\n"
+        "        mv \"/data/adb/$s.disabled-by-samtimer\" \"/data/adb/$s\"\n"
+        "      fi\n"
+        "      echo \"[safe] $s restored\"\n"
+        "    done\n"
+        "    echo '[safe] modules + script dirs restored'\n"
+        "  fi\n"
+        "  rm -f /data/local/tmp/samtimer/safe_mode\n"
+        "fi\n"
         "KSUD=/data/local/tmp/samtimer/ksud\n"
         "[ -x \"$KSUD\" ] || KSUD=/data/local/tmp/ksud\n"
         "if [ ! -x \"$KSUD\" ]; then echo '[ksu] ksud missing'; exit 1; fi\n"

@@ -34,8 +34,15 @@ Tested on **SM-S921N** (e1s, Exynos 2400), kernel
 - Confirmation dialog before every run; **re-root** button stays available
   when already rooted
 - **Auto-root after reboot** — boot receiver → WorkManager chain that waits
-  for Shizuku, then runs the chain headless with progress notifications;
-  a failed run disables the option itself (boot-loop protection)
+  3 minutes for the system to settle, waits for Shizuku, then runs the chain
+  headless with progress notifications; a failed run disables the option
+  itself (boot-loop protection)
+- **Safe boot (block modules)** — one-run panic recovery for a bad module:
+  at the next run the rooted stage touches `disable` in every KernelSU
+  module dir and parks `service.d` / `post-fs-data.d`; turn the switch off
+  and the following run restores everything (the auto-root chain re-establishes
+  root every boot regardless, so the fix reaches you even if the phone
+  boot-looped)
 - The exploit payload is compiled automatically by Gradle — `assembleDebug`
   always ships a fresh binary
 
