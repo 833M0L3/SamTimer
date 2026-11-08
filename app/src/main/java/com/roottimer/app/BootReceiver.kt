@@ -7,6 +7,7 @@ import android.os.SystemClock
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,6 +36,29 @@ class BootReceiver : BroadcastReceiver() {
             .putLong(Prefs.BOOT_AT_ELAPSED, SystemClock.elapsedRealtime())
             .apply()
         if (!prefs.getBoolean(Prefs.AUTO_ROOT, false)) return
+
+        // A soft reboot (SystemServer restart) re-delivers BOOT_COMPLETED
+        // while the kernel -- and the live kernelsu module -- is untouched.
+        // Running the UAF chain again on a live system is wasted risk, so
+        // bail out here and also drop any pending/retrying auto-root work a
+        // previous boot left behind (the workers double-check, but stale
+        // queued work must not fire at all).
+        val alreadyRooted = try {
+            File("/proc/modules").useLines { lines ->
+                lines.any { it.startsWith("kernelsu ") }
+            }
+        } catch (_: Exception) {
+            false
+        }
+        if (alreadyRooted) {
+            AutoRootNotif.post(
+                context, 1,
+                context.getString(R.string.notif_already),
+                context.getString(R.string.notif_already_text)
+            )
+            WorkManager.getInstance(context).cancelUniqueWork("auto_root")
+            return
+        }
 
         val wait = OneTimeWorkRequestBuilder<ShizukuWaitWorker>()
             .setInitialDelay(180, TimeUnit.SECONDS)
